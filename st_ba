@@ -1,0 +1,4066 @@
+"""
+Cancer Research Intelligence Platform - Professional Dashboard
+User: pulkit-079
+Date: 2025-11-04 22:41:09
+
+Professional-grade analytics platform for oncology research
+Version: 4.1.0
+"""
+
+import streamlit as st
+import os
+import pandas as pd
+from openai import OpenAI, AzureOpenAI
+import json
+import requests
+import time
+import re
+import ast
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import numpy as np
+from typing import Union, List, Dict, Any, Optional
+from rapidfuzz import process
+from cbio_py import cbio_mod as cb
+import traceback
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import base64
+import threading
+import base64
+from functools import lru_cache
+import os
+import requests
+import time
+import re
+import json
+import pandas as pd
+from typing import Union, List, Dict
+from openai import AzureOpenAI
+from datetime import datetime
+from fuzzywuzzy import fuzz
+from fuzzywuzzy import process
+import hashlib
+import pickle
+
+# Import configuration
+from config import config
+
+AXTRIA_LOGO_URL = "./static/axtria-logo.png"
+
+
+# ============================================================================
+# PAGE CONFIGURATION
+# ============================================================================
+
+st.set_page_config(
+    page_title=f"{config.APP_NAME} - Professional Dashboard",
+    page_icon="🧬",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# ============================================================================
+# SESSION STATE INITIALIZATION
+# ============================================================================
+
+if 'df_raw_cbio' not in st.session_state:
+    st.session_state.df_raw_cbio = None
+if 'df_clean' not in st.session_state:
+    st.session_state.df_clean = None
+if 'df_pivot' not in st.session_state:
+    st.session_state.df_pivot = None
+if 'df_bm' not in st.session_state:
+    st.session_state.df_bm = None
+if 'selected_biomarkers' not in st.session_state:
+    st.session_state.selected_biomarkers = []
+if 'drug_list' not in st.session_state:
+    st.session_state.drug_list = []
+if 'drug_biomarker_map' not in st.session_state:
+    st.session_state.drug_biomarker_map = {}
+if 'df_fda_comprehensive' not in st.session_state:
+    st.session_state.df_fda_comprehensive = {}
+if 'df_clinical_trials' not in st.session_state:
+    st.session_state.df_clinical_trials = None
+if 'sponsor_market_data' not in st.session_state:
+    st.session_state.sponsor_market_data = {}
+if 'processing_done' not in st.session_state:
+    st.session_state.processing_done = False
+if 'condition_keyword' not in st.session_state:
+    st.session_state.condition_keyword = ""
+if 'total_available_studies' not in st.session_state:
+    st.session_state.total_available_studies = 0
+if 'df_gene_frequencies' not in st.session_state:
+    st.session_state.df_gene_frequencies = None
+if 'selection_details' not in st.session_state:
+    st.session_state.selection_details = {}
+    
+
+# ============================================================================
+# PROFESSIONAL THEME CSS WITH AXTRIA BRANDING
+# ============================================================================
+
+st.markdown("""
+<style>
+    /* Professional consulting deck theme */
+    :root {
+        --axtria-teal: #1F6F65;
+        --light-teal: #7EC8C3;
+        --lighter-teal: #B4DED9;
+        --lightest-teal: #E8F5F3;
+        --orange: #F36F21;
+        --light-orange: #FFB380;
+        --blue: #005B82;
+        --light-blue: #6BA8C4;
+    }
+    
+    /* Main Header with Axtria Branding */
+    .main-header {
+        background: linear-gradient(135deg, #1F6F65 0%, #005B82 100%);
+        color: white;
+        padding: 1.5rem 2rem;
+        border-radius: 12px;
+        margin-bottom: 2rem;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    
+    .header-content {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 2rem;
+    }
+    
+    .header-text {
+        flex: 1;
+    }
+    
+    .header-text h1 {
+        margin: 0;
+        font-size: 1.6rem;
+        font-weight: 600;
+        line-height: 1.3;
+    }
+    
+    .header-text h2 {
+        margin: 0.3rem 0 0 0;
+        font-size: 0.95rem;
+        font-weight: 400;
+        opacity: 0.95;
+        line-height: 1.2;
+    }
+    
+    .header-logo {
+        flex-shrink: 0;
+    }
+    
+    .axtria-logo {
+        height: 40px;
+        filter: brightness(0) invert(1);
+    }
+    
+    /* Professional Metric Cards */
+    .metric-card {
+        background: white;
+        border-left: 4px solid #1F6F65;
+        padding: 1.5rem;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+        margin: 0.5rem 0;
+    }
+    
+    .metric-card h3 {
+        margin: 0;
+        font-size: 2.5rem;
+        font-weight: 700;
+        color: #1F6F65;
+    }
+    
+    .metric-card p {
+        margin: 0.5rem 0 0 0;
+        font-size: 0.95rem;
+        color: #4A4A4A;
+        font-weight: 500;
+    }
+    
+    .metric-card.orange {
+        border-left-color: #F36F21;
+    }
+    
+    .metric-card.orange h3 {
+        color: #F36F21;
+    }
+    
+    .metric-card.blue {
+        border-left-color: #005B82;
+    }
+    
+    .metric-card.blue h3 {
+        color: #005B82;
+    }
+    
+    .metric-card.yellow {
+        border-left-color: #F9A01B;
+    }
+    
+    .metric-card.yellow h3 {
+        color: #F9A01B;
+    }
+    
+    /* Section Headers */
+    .section-header {
+        color: #1F6F65;
+        font-size: 1.5rem;
+        font-weight: 600;
+        margin: 2rem 0 1rem 0;
+        padding-bottom: 0.5rem;
+        border-bottom: 2px solid #E8F5F3;
+    }
+    
+    /* Buttons */
+    .stButton>button {
+        background-color: #1F6F65 !important;
+        color: white !important;
+        border-radius: 6px !important;
+        padding: 0.5rem 2rem !important;
+        font-weight: 600 !important;
+        border: none !important;
+        transition: all 0.3s ease !important;
+    }
+    
+    .stButton>button:hover {
+        background-color: #005B82 !important;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.15) !important;
+    }
+    
+    /* Tabs */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 1rem;
+        background-color: #F8F9FA;
+        padding: 0.5rem;
+        border-radius: 8px;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        padding: 0.75rem 1.5rem;
+        font-weight: 600;
+        border-radius: 6px;
+        color: #4A4A4A;
+    }
+    
+    .stTabs [aria-selected="true"] {
+        background-color: #1F6F65;
+        color: white;
+    }
+    
+    /* DataFrames */
+    .dataframe {
+        font-size: 0.9rem;
+        border: 1px solid #E0E0E0;
+    }
+    
+    .dataframe thead th {
+        background-color: #E8F5F3 !important;
+        color: #1F6F65 !important;
+        font-weight: 600 !important;
+    }
+    
+    /* Remove excess padding */
+    .block-container {
+        padding-top: 1.5rem;
+        padding-bottom: 1.5rem;
+    }
+    
+    /* Info/Warning boxes */
+    .stAlert {
+        border-radius: 6px;
+    }
+    
+    /* Plotly charts */
+    .js-plotly-plot {
+        border-radius: 8px;
+    }
+    
+    /* Expander styling */
+    .streamlit-expanderHeader {
+        background-color: #F8F9FA;
+        border-radius: 6px;
+        font-weight: 600;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+
+
+logo_path = config.AXTRIA_LOGO_URL
+# Convert logo to base64 so Streamlit can render it in HTML
+def get_base64_logo(logo_path: str):
+    if os.path.exists(logo_path):
+        with open(logo_path, "rb") as f:
+            return base64.b64encode(f.read()).decode()
+    return None
+
+logo_base64 = get_base64_logo(logo_path)
+
+# Render header with embedded logo (inline)
+
+st.markdown(f"""
+<div class="main-header">
+    <div class="header-content">
+        <div class="header-text">
+            <h1>🧬 Cancer Research Intelligence Platform</h1>
+            <h2>Genomic Insights • Drug Discovery • Clinical Pipeline</h2>
+        </div>
+        <div class="header-logo">
+            <img src="data:image/png;base64,{logo_base64}" class="axtria-logo" alt="Axtria">
+        </div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+
+# ============================================================================
+# CACHING SYSTEM - LOCAL PERSISTENT STORAGE
+# ============================================================================
+
+class DataCache:
+    """
+    Persistent caching system for study data, keyed by study ID.
+    Stores raw and cleaned data for each study separately.
+    Aggregates by keyword when needed.
+    """
+    
+    def __init__(self, cache_dir: str = ".cache"):
+        self.cache_dir = cache_dir
+        os.makedirs(cache_dir, exist_ok=True)
+    
+    def _get_cache_file(self, study_id: str, data_type: str) -> str:
+        """Get full path for a study cache file (raw, clean, metadata)"""
+        safe_id = hashlib.md5(study_id.encode()).hexdigest()
+        return os.path.join(self.cache_dir, f"{safe_id}_{data_type}.pkl")
+    
+    def save_study_data(self, study_id: str, df_raw: pd.DataFrame, df_clean: pd.DataFrame, metadata: Dict) -> bool:
+        """Save raw, cleaned data, and metadata for a single study"""
+        try:
+            # Save raw
+            with open(self._get_cache_file(study_id, "raw"), 'wb') as f:
+                pickle.dump(df_raw, f)
+            # Save cleaned
+            with open(self._get_cache_file(study_id, "clean"), 'wb') as f:
+                pickle.dump(df_clean, f)
+            # Save metadata
+            metadata['study_id'] = study_id
+            metadata['cached_at'] = datetime.now().isoformat()
+            with open(self._get_cache_file(study_id, "metadata"), 'wb') as f:
+                pickle.dump(metadata, f)
+            return True
+        except Exception as e:
+            st.warning(f"⚠️ Failed to cache study {study_id}: {str(e)}")
+            return False
+    
+    def load_study_data(self, study_id: str) -> Dict:
+        """Load cached data for a single study"""
+        try:
+            raw_file = self._get_cache_file(study_id, "raw")
+            clean_file = self._get_cache_file(study_id, "clean")
+            metadata_file = self._get_cache_file(study_id, "metadata")
+            
+            if not (os.path.exists(raw_file) and os.path.exists(clean_file) and os.path.exists(metadata_file)):
+                return {'found': False, 'reason': 'Cache files not found'}
+            
+            with open(raw_file, 'rb') as f:
+                df_raw = pickle.load(f)
+            with open(clean_file, 'rb') as f:
+                df_clean = pickle.load(f)
+            with open(metadata_file, 'rb') as f:
+                metadata = pickle.load(f)
+            
+            return {'found': True, 'df_raw': df_raw, 'df_clean': df_clean, 'metadata': metadata}
+        except Exception as e:
+            return {'found': False, 'reason': f'Error loading cache: {str(e)}'}
+    
+    def list_cached_studies(self) -> List[Dict]:
+        """Return a list of all cached studies with their metadata."""
+        
+        cached = []
+
+        for file in os.listdir(self.cache_dir):
+            if file.endswith("_metadata.pkl"):
+                meta_path = os.path.join(self.cache_dir, file)
+                try:
+                    with open(meta_path, "rb") as f:
+                        metadata = pickle.load(f)
+                    study_id = metadata.get("study_id")
+
+                    study = self.load_study_data(study_id)
+                    if study["found"]:
+                        cached.append({
+                            "study_id": study_id,
+                            "metadata": metadata,
+                            "raw_records": len(study["df_raw"]),
+                            "clean_records": len(study["df_clean"]),
+                            "cached_at": metadata.get("cached_at", "Unknown")
+                        })
+                except:
+                    continue
+        
+        return cached
+
+    
+    
+    def clear_study_cache(self, study_id: str) -> bool:
+        """Remove cached files for a single study"""
+        try:
+            for suffix in ['raw', 'clean', 'metadata']:
+                file_path = self._get_cache_file(study_id, suffix)
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            return True
+        except Exception as e:
+            st.warning(f"⚠️ Failed to clear cache for {study_id}: {str(e)}")
+            return False
+        
+    def clear_all_cache(self) -> bool:
+        try:
+            for file in os.listdir(self.cache_dir):
+                os.remove(os.path.join(self.cache_dir, file))
+            return True
+        except Exception as e:
+            st.warning(f"⚠️ Failed to clear all cache: {str(e)}")
+            return False
+    
+    
+
+# Initialize global cache manager
+cache_manager = DataCache(cache_dir=".study_cache")
+
+# ============================================================================
+# BACKEND FUNCTIONS - DATA FETCHING
+# ============================================================================
+
+
+def fuzzy_match_backend(biomarkers, df_bm):
+    """Fuzzy match biomarkers to drugs using RapidFuzz"""
+    try:
+        biomarker_options = df_bm['Biomarker'].dropna().unique().tolist()
+        
+        # def get_match(gene):
+        #     match, score, _ = process.extractOne(gene, biomarker_options)
+        #     return match if score >= 80 else None
+        def get_match(gene):
+            result = process.extractOne(gene, biomarker_options)
+            if result is None:
+                return None
+            if len(result) == 3:
+                match, score, _ = result
+            else:
+                match, score = result
+            return match if score >= 70 else None
+        
+        matched = []
+        drug_biomarker_map = {}
+        
+        for gene in biomarkers:
+            match = get_match(gene)
+            if match:
+                drugs = df_bm[df_bm['Biomarker'] == match]['Drug'].tolist()
+                for drug in drugs:
+                    clean_drug = re.sub(r'\s*\(\d+\)', '', drug)
+                    matched.append(clean_drug)
+                    
+                    if clean_drug not in drug_biomarker_map:
+                        drug_biomarker_map[clean_drug] = []
+                    drug_biomarker_map[clean_drug].append(gene)
+        
+        cleaned = list(set(matched))
+        return cleaned, drug_biomarker_map
+    except Exception as e:
+        st.error(f"Fuzzy match error: {str(e)}")
+        return [], {}
+
+# ============================================================================
+# FDA LABEL FETCHING
+# ============================================================================
+
+session = requests.Session()
+session.headers.update({"User-Agent": "FDADataFetcher/1.0"})
+
+
+def http_get_with_retries(url: str, max_retries: int = 3, backoff: float = 0.5, timeout: int = 10):
+    """GET request with retry and session reuse"""
+    for attempt in range(1, max_retries + 1):
+        try:
+            resp = session.get(url, timeout=timeout)
+            if resp.status_code == 200:
+                return resp
+        except requests.RequestException:
+            pass
+        time.sleep(backoff * 2 ** (attempt - 1))
+    return None
+
+
+def parse_fda_date(date_str):
+    """Convert FDA date format like 20231215 → 2023-12-15"""
+    s = str(date_str)
+    return f"{s[:4]}-{s[4:6]}-{s[6:8]}" if len(s) == 8 and s.isdigit() else s
+
+
+def clean_html(raw_html: str) -> str:
+    """Remove HTML tags quickly"""
+    if not raw_html:
+        return ""
+    text = re.sub(r"<[^>]+>", " ", str(raw_html))
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def fetch_fda_labels(drug: str, limit_per_drug: int = 1) -> pd.DataFrame:
+    """Fetch FDA drug labels"""
+    safe_drug = str(drug).replace('"', '')
+    url = f"https://api.fda.gov/drug/label.json?search=openfda.generic_name:\"{safe_drug}\"&limit={limit_per_drug}"
+    resp = http_get_with_retries(url)
+    if resp:
+        data = resp.json()
+        return pd.json_normalize(data.get("results", []))
+    return pd.DataFrame()
+
+
+def summarize_drug_label(df: pd.DataFrame, azure_client: AzureOpenAI) -> str:
+    """Summarize clinical studies from FDA labels"""
+    if "clinical_studies" not in df.columns:
+        return "No clinical studies data"
+
+    text_blocks = [
+        clean_html(str(val))
+        for val in df["clinical_studies"].dropna()
+        if str(val).strip()
+    ]
+
+    if not text_blocks:
+        return "No clinical study text found"
+
+    combined_text = "\n\n".join(text_blocks)[:24000]
+    prompt = f"Extract and summarize key clinical studies information:\n\n{combined_text}"
+
+    try:
+        response = azure_client.chat.completions.create(
+            model=config.AZURE_DEPLOYMENT_NAME,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=2000,
+            temperature=0.2
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        return f"Error summarizing: {e}"
+
+
+def fetch_fda_comprehensive_per_drug(drug_name, azure_client=None):
+    """Fetch comprehensive FDA drug data"""
+    result = {'drug_name': drug_name, 'profile_df': None, 'submissions_df': None, 'clinical_summary': "No data available"}
+    url = f"https://api.fda.gov/drug/drugsfda.json?search=\"{drug_name}\"&limit=5"
+
+    resp = http_get_with_retries(url)
+    if not resp:
+        return result
+
+    data = resp.json()
+    results = data.get("results", [])
+    if not results:
+        return result
+
+    submissions_expanded, openfda_rows = [], []
+
+    for res in results:
+        app_num = res.get("application_number")
+        sponsor = res.get("sponsor_name")
+
+        for sub in res.get("submissions", []):
+            s = sub.copy()
+            s["application_number"] = app_num
+            s["sponsor_name"] = sponsor
+            submissions_expanded.append(s)
+
+        flat = {k: "|".join(map(str, v))[:100] if isinstance(v, list) else str(v)[:100]
+                for k, v in res.get("openfda", {}).items()}
+        flat["application_number"] = app_num
+        openfda_rows.append(flat)
+
+    openfda_df = pd.DataFrame(openfda_rows)
+    submissions_df = pd.DataFrame(submissions_expanded)
+
+    profile_columns = ["application_number", "brand_name", "generic_name", "manufacturer_name"]
+    profile_df = openfda_df[[c for c in profile_columns if c in openfda_df.columns]].copy()
+
+    if not submissions_df.empty and "submission_type" in submissions_df.columns:
+        orig_sub = submissions_df[submissions_df["submission_type"] == "ORIG"]
+        if not orig_sub.empty and "submission_status_date" in orig_sub.columns:
+            profile_df["Approval Date"] = parse_fda_date(orig_sub["submission_status_date"].iloc[0])
+
+    result["profile_df"] = profile_df
+
+    if not submissions_df.empty:
+        key_cols = ['submission_type', 'submission_status', 'submission_status_date', 'review_priority']
+        sub_narrow = submissions_df[[c for c in key_cols if c in submissions_df.columns]].copy()
+        if 'submission_status_date' in sub_narrow.columns:
+            sub_narrow['submission_status_date'] = sub_narrow['submission_status_date'].map(parse_fda_date)
+        result['submissions_df'] = sub_narrow.head(10)
+
+    df_labels = fetch_fda_labels(drug_name)
+    if not df_labels.empty and azure_client:
+        result['clinical_summary'] = summarize_drug_label(df_labels, azure_client)
+
+    return result
+
+
+def fetch_fda_for_multiple(drugs: List[str], max_workers: int = 5, summarize: bool = True):
+    """Parallel FDA fetching"""
+    azure_client = None
+    if summarize:
+        azure_client = AzureOpenAI(
+            api_key=config.AZURE_OPENAI_API_KEY,
+            api_version=config.AZURE_API_VERSION,
+            azure_endpoint=config.AZURE_OPENAI_ENDPOINT
+        )
+
+    results = []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(fetch_fda_comprehensive_per_drug, d, azure_client): d for d in drugs
+        }
+        for fut in as_completed(futures):
+            results.append(fut.result())
+
+    return results
+
+# ============================================================================
+# CLINICAL STUDIES SUMMARIZATION
+# ============================================================================
+
+def summarize_drug_label(df: pd.DataFrame, chat_model: str = "gpt-4o-mini") -> str:
+    """Summarize clinical studies from FDA labels using Azure OpenAI"""
+    try:
+        azure_client = AzureOpenAI(
+            api_key=config.AZURE_OPENAI_API_KEY,
+            api_version=config.AZURE_API_VERSION,
+            azure_endpoint=config.AZURE_OPENAI_ENDPOINT
+        )
+        
+        if "clinical_studies" not in df.columns:
+            return "No clinical studies data"
+        
+        text_blocks = []
+        for i, row in df.iterrows():
+            val = row.get("clinical_studies", "")
+            if pd.notna(val) and str(val).strip():
+                text_blocks.append(clean_html(str(val)))
+        
+        if not text_blocks:
+            return "No clinical study text found"
+        
+        combined_text = "\n\n".join(text_blocks)
+        
+        prompt = f"Extract and summarize key clinical studies information:\n\n{combined_text[:24000]}"
+        
+        response = azure_client.chat.completions.create(
+            model=config.AZURE_DEPLOYMENT_NAME,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=2000,
+            temperature=0.2
+        )
+        
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+
+# ============================================================================
+# COMPREHENSIVE FDA DRUG DATA FETCHING
+# ============================================================================
+
+def fetch_fda_comprehensive_per_drug_fixed(drug_name: str) -> Dict:
+    """Fetch comprehensive FDA drug data"""
+    try:
+        result = {
+            'drug_name': drug_name,
+            'profile_df': None,
+            'submissions_df': None,
+            'clinical_summary': "No data available"
+        }
+        
+        url = f"https://api.fda.gov/drug/drugsfda.json?search=\"{drug_name}\"&limit=5"
+        resp = requests.get(url, timeout=10)
+        
+        if resp.status_code != 200:
+            return result
+        
+        data = resp.json()
+        results = data.get("results", [])
+        if not results:
+            return result
+        
+        submissions_expanded = []
+        openfda_rows = []
+        
+        for res in results:
+            app_num = res.get("application_number")
+            sponsor = res.get("sponsor_name")
+            
+            for sub in res.get("submissions", []):
+                s = sub.copy()
+                s["application_number"] = app_num
+                s["sponsor_name"] = sponsor
+                submissions_expanded.append(s)
+            
+            of = res.get("openfda", {})
+            flat = {}
+            for k, v in of.items():
+                flat[k] = "|".join(map(str, v))[:100] if isinstance(v, list) else str(v)[:100]
+            flat["application_number"] = app_num
+            openfda_rows.append(flat)
+        
+        openfda_df = pd.DataFrame(openfda_rows)
+        submissions_df = pd.DataFrame(submissions_expanded)
+        
+        profile_columns = ["application_number", "brand_name", "generic_name", "manufacturer_name"]
+        profile_df = openfda_df[[c for c in profile_columns if c in openfda_df.columns]].copy()
+        
+        if not submissions_df.empty and "submission_type" in submissions_df.columns:
+            orig_submissions = submissions_df[submissions_df["submission_type"] == "ORIG"]
+            if not orig_submissions.empty and "submission_status_date" in orig_submissions.columns:
+                approval_date = parse_fda_date(orig_submissions["submission_status_date"].iloc[0])
+                profile_df["Approval Date"] = approval_date
+        
+        result['profile_df'] = profile_df
+        
+        if not submissions_df.empty:
+            key_cols = ['submission_type', 'submission_status', 'submission_status_date', 'review_priority']
+            submissions_narrow = submissions_df[[c for c in key_cols if c in submissions_df.columns]].copy()
+            
+            if 'submission_status_date' in submissions_narrow.columns:
+                submissions_narrow['submission_status_date'] = submissions_narrow['submission_status_date'].apply(parse_fda_date)
+            
+            result['submissions_df'] = submissions_narrow.head(10)
+        
+        df_labels = fetch_fda_labels(drug_name, limit_per_drug=1)
+        if not df_labels.empty:
+            summary = summarize_drug_label(df_labels)
+            result['clinical_summary'] = summary
+        
+        return result
+        
+    except Exception as e:
+        return {
+            'drug_name': drug_name,
+            'profile_df': None,
+            'submissions_df': None,
+            'clinical_summary': f"Error: {str(e)}"
+        }
+
+
+# ============================================================================
+# INDICATION AND LINE OF THERAPY EXTRACTION
+# ============================================================================
+
+def extract_indication_and_lot(drug_name: str, drug_data: dict) -> dict:
+    """Extract approved indications and line of therapy from FDA data using Azure OpenAI"""
+    try:
+        azure_client = AzureOpenAI(
+            api_key=config.AZURE_OPENAI_API_KEY,
+            api_version=config.AZURE_API_VERSION,
+            azure_endpoint=config.AZURE_OPENAI_ENDPOINT
+        )
+        
+        text_sources = []
+        
+        if 'clinical_summary' in drug_data and drug_data['clinical_summary']:
+            text_sources.append(f"Clinical Summary: {drug_data['clinical_summary']}")
+        
+        if drug_data['profile_df'] is not None and not drug_data['profile_df'].empty:
+            profile_text = drug_data['profile_df'].to_string(index=False)
+            text_sources.append(f"Profile Data: {profile_text}")
+        
+        combined_text = "\n\n".join(text_sources)
+        
+        if not combined_text.strip():
+            return {
+                'indications': [],
+                'line_of_therapy': [],
+                'primary_use': 'Information not available',
+                'cancer_types': [],
+                'positioning': 'Information not available'
+            }
+        
+        extraction_prompt = f"""You are an FDA regulatory expert. Analyze this drug information and extract key details.
+
+Drug Name: {drug_name}
+
+Available Data:
+{combined_text[:4000]}
+
+Extract and return the following in JSON format:
+
+1. **indications**: List of all approved indications (specific conditions/cancer types the drug treats)
+2. **line_of_therapy**: List of treatment lines mentioned (e.g., "First-line", "Second-line", "Third-line or later", "Maintenance", "Combination therapy")
+3. **primary_use**: Brief one-sentence description of primary therapeutic use
+4. **cancer_types**: List of specific cancer types mentioned (e.g., "Ovarian Cancer", "Lung Cancer")
+5. **positioning**: Strategic positioning (e.g., "First-line monotherapy for BRCA-mutated ovarian cancer")
+
+Instructions:
+- Be specific and extract exact indications from FDA-approved text
+- For line of therapy, look for phrases like "first-line", "previously treated", "relapsed", "refractory", "maintenance"
+- If information is not available, return empty list or "Not specified"
+- Extract only FDA-approved indications, not investigational uses
+
+Return valid JSON only."""
+
+        response = azure_client.chat.completions.create(
+            model=config.AZURE_DEPLOYMENT_NAME,
+            messages=[
+                {
+                    "role": "system", 
+                    "content": "You are an FDA regulatory expert specializing in oncology drug approvals. Extract precise information from drug labels."
+                },
+                {"role": "user", "content": extraction_prompt}
+            ],
+            temperature=0.1,
+            max_tokens=1500,
+            response_format={"type": "json_object"}
+        )
+        
+        extracted_data = json.loads(response.choices[0].message.content)
+        
+        result = {
+            'indications': extracted_data.get('indications', []),
+            'line_of_therapy': extracted_data.get('line_of_therapy', []),
+            'primary_use': extracted_data.get('primary_use', 'Not specified'),
+            'cancer_types': extracted_data.get('cancer_types', []),
+            'positioning': extracted_data.get('positioning', 'Information not available')
+        }
+        
+        return result
+        
+    except Exception as e:
+        st.warning(f"Could not extract indication/LoT info: {str(e)}")
+        return {
+            'indications': [],
+            'line_of_therapy': [],
+            'primary_use': 'Extraction failed',
+            'cancer_types': [],
+            'positioning': 'Extraction failed'
+        }
+
+
+# ============================================================================
+# TREATMENT DATABASE FUNCTIONS (FDA SUBTAB 2)
+# ============================================================================
+
+def load_treatment_database() -> pd.DataFrame:
+    """Load treatment database from static folder"""
+    try:
+        static_file_path_1 = os.path.join("static", "drugs.xlsx")
+        
+        if not os.path.exists(static_file_path_1):
+            st.error(f"⚠️ File not found: {static_file_path_1}")
+            return None
+        
+        # Load specific sheet
+        df_drugs = pd.read_excel(static_file_path_1, sheet_name='drugs')
+        
+        # Validate required columns
+        required_cols = ['Name', 'Histology', 'Primary Site', 'Remarks', 'Category', 'Sub-category']
+        missing_cols = [col for col in required_cols if col not in df_drugs.columns]
+        
+        if missing_cols:
+            st.error(f"❌ Missing required columns: {missing_cols}")
+            st.info(f"Available columns: {list(df_drugs.columns)}")
+            return None
+        
+        return df_drugs
+        
+    except Exception as e:
+        st.error(f"Error loading treatment database: {str(e)}")
+        return None
+
+
+def fuzzy_match_treatments(cancer_keyword: str, df_drugs: pd.DataFrame, threshold: int = 70) -> pd.DataFrame:
+    """
+    Fuzzy match cancer keyword against Histology and Primary Site columns
+    Returns matched treatments with similarity scores
+    """
+    try:
+        if df_drugs is None or df_drugs.empty:
+            return None
+        
+        # Create searchable text by combining Histology and Primary Site
+        df_drugs['Search_Text'] = (
+            df_drugs['Histology'].astype(str) + ' ' + 
+            df_drugs['Primary Site'].astype(str)
+        ).str.lower()
+        
+        cancer_lower = cancer_keyword.lower()
+        
+        # Calculate fuzzy match scores for each row
+        df_drugs['Match_Score'] = df_drugs['Search_Text'].apply(
+            lambda x: max(
+                fuzz.partial_ratio(cancer_lower, x),
+                fuzz.token_set_ratio(cancer_lower, x)
+            )
+        )
+        
+        # Filter by threshold
+        matched_df = df_drugs[df_drugs['Match_Score'] >= threshold].copy()
+        
+        if matched_df.empty:
+            return None
+        
+        # Sort by match score (highest first)
+        matched_df = matched_df.sort_values('Match_Score', ascending=False)
+        
+        # Select relevant columns
+        result_cols = ['Name', 'Histology', 'Primary Site', 'Remarks', 'Category', 'Sub-category', 'Match_Score']
+        matched_df = matched_df[result_cols].copy()
+        
+        # Remove duplicates based on Name
+        matched_df = matched_df.drop_duplicates(subset=['Name'])
+        
+        return matched_df
+        
+    except Exception as e:
+        st.error(f"Error in fuzzy matching: {str(e)}")
+        return None
+
+
+def fetch_drug_details_from_fda(generic_name: str) -> Dict:
+    """
+    Fetch comprehensive drug details from drugs@FDA API
+    CACHED VERSION - only fetches once per drug
+    """
+    try:
+        # Check cache first
+        cache_key = f"fda_details_{generic_name.lower().strip()}"
+        
+        if cache_key in st.session_state:
+            return st.session_state[cache_key]
+        
+        base_url = "https://api.fda.gov/drug/drugsfda.json"
+        
+        # Clean drug name for search
+        clean_name = generic_name.strip().replace(' ', '+')
+        
+        params = {
+            'search': f'openfda.generic_name:"{clean_name}"',
+            'limit': 1
+        }
+        
+        response = requests.get(base_url, params=params, timeout=15)
+        
+        if response.status_code != 200:
+            result = {
+                'found': False,
+                'message': 'Drug not found in FDA database'
+            }
+            st.session_state[cache_key] = result
+            return result
+        
+        data = response.json()
+        results = data.get('results', [])
+        
+        if not results:
+            result = {
+                'found': False,
+                'message': 'No FDA data available'
+            }
+            st.session_state[cache_key] = result
+            return result
+        
+        # Parse first result
+        drug_data = results[0]
+        openfda = drug_data.get('openfda', {})
+        
+        # Extract key information
+        brand_names = openfda.get('brand_name', [])
+        manufacturers = openfda.get('manufacturer_name', [])
+        app_number = drug_data.get('application_number', 'N/A')
+        
+        # Get submissions
+        submissions = drug_data.get('submissions', [])
+        approval_date = 'N/A'
+        
+        for sub in submissions:
+            if sub.get('submission_type') == 'ORIG':
+                approval_date = sub.get('submission_status_date', 'N/A')
+                if approval_date != 'N/A' and len(str(approval_date)) == 8:
+                    approval_date = f"{approval_date[:4]}-{approval_date[4:6]}-{approval_date[6:8]}"
+                break
+        
+        # Get products
+        products = drug_data.get('products', [])
+        dosage_forms = []
+        routes = []
+        
+        for product in products[:3]:
+            dosage_form = product.get('dosage_form', '')
+            route = product.get('route', '')
+            if dosage_form:
+                dosage_forms.append(dosage_form)
+            if route:
+                routes.append(route)
+        
+        # Generate proper drugs@FDA URL
+        fda_url = None
+        if app_number != 'N/A':
+            clean_app_num = str(app_number).replace('NDA', '').replace('ANDA', '').replace('BLA', '').strip()
+            fda_url = f"https://www.accessdata.fda.gov/scripts/cder/daf/index.cfm?event=overview.process&ApplNo={clean_app_num}"
+        
+        result = {
+            'found': True,
+            'brand_names': brand_names[:3],
+            'generic_name': generic_name,
+            'manufacturers': manufacturers[:2],
+            'application_number': app_number,
+            'approval_date': approval_date,
+            'dosage_forms': list(set(dosage_forms)),
+            'routes': list(set(routes)),
+            'fda_url': fda_url,
+            'fetch_timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+        
+        # Cache result
+        st.session_state[cache_key] = result
+        
+        return result
+        
+    except Exception as e:
+        result = {
+            'found': False,
+            'message': f'Error: {str(e)}'
+        }
+        st.session_state[cache_key] = result
+        return result
+
+
+def summarize_indication_text(full_text: str, drug_name: str) -> str:
+    """
+    Fast, precise indication summary - NO AI for speed
+    Uses smart text extraction instead
+    """
+    try:
+        if full_text == 'N/A' or not full_text.strip():
+            return 'Not available'
+        
+        # Clean HTML
+        clean_text = re.sub(r'<[^>]+>', ' ', full_text)
+        clean_text = ' '.join(clean_text.split())
+        
+        # If already short, return as-is
+        if len(clean_text) <= 120:
+            return clean_text
+        
+        # Smart extraction: Look for key patterns
+        patterns = {
+            'indication': r'indicated for(.*?)(?:\.|in combination|as)',
+            'treatment': r'treatment of(.*?)(?:\.|in patients|with)',
+            'patients': r'in patients with(.*?)(?:\.|who have|following)',
+            'cancer_type': r'(advanced|metastatic|recurrent|refractory)\s+(\w+\s+){0,3}(cancer|carcinoma|tumor)',
+            'line': r'(first-line|second-line|third-line|previously treated|maintenance|adjuvant|neoadjuvant)'
+        }
+        
+        # Extract key components
+        cancer_type = ''
+        line_therapy = ''
+        population = ''
+        
+        # Find cancer type
+        cancer_match = re.search(patterns['cancer_type'], clean_text, re.IGNORECASE)
+        if cancer_match:
+            cancer_type = cancer_match.group(0).strip()
+        
+        # Find line of therapy
+        line_match = re.search(patterns['line'], clean_text, re.IGNORECASE)
+        if line_match:
+            line_therapy = line_match.group(0).strip().title()
+        
+        # Try to extract indication
+        for pattern_name, pattern in [('indication', patterns['indication']), 
+                                       ('treatment', patterns['treatment']), 
+                                       ('patients', patterns['patients'])]:
+            match = re.search(pattern, clean_text, re.IGNORECASE)
+            if match:
+                population = match.group(1).strip()[:60]
+                break
+        
+        # Build summary
+        if cancer_type and line_therapy:
+            summary = f"{cancer_type.title()} - {line_therapy}"
+            if population:
+                summary += f" - {population[:40]}"
+        elif cancer_type:
+            summary = cancer_type.title()
+            if population:
+                summary += f" - {population[:60]}"
+        elif population:
+            summary = population[:100]
+        else:
+            # Fallback: First sentence
+            sentences = clean_text.split('.')
+            summary = sentences[0].strip()[:117]
+        
+        # Ensure max length
+        if len(summary) > 120:
+            summary = summary[:117] + "..."
+        
+        return summary
+        
+    except Exception:
+        # Ultimate fallback
+        clean_text = re.sub(r'<[^>]+>', ' ', full_text)
+        clean_text = ' '.join(clean_text.split())
+        return (clean_text[:117] + "...") if len(clean_text) > 120 else clean_text
+
+# ============================================================================
+# TREATMENT DATABASE - FUZZY MATCHING & FDA INTEGRATION
+# ============================================================================  
+    
+def get_total_studies_count(keyword: str) -> int:
+    """Get total count of available studies for dynamic slider"""
+    try:
+        st_df = cb.getAllStudies()
+        if isinstance(st_df, list):
+            st_df = pd.DataFrame(st_df)
+        
+        filtered = st_df[
+            st_df['studyId'].str.contains(keyword, case=False, na=False) | 
+            st_df['name'].str.contains(keyword, case=False, na=False)
+        ]
+        return len(filtered)
+    except:
+        return 30
+
+
+def fetch_patient_batch(patient_ids, study_id):
+    """Fetch a batch of patients' clinical data with minimal overhead"""
+    patient_details = []
+
+    for pid in patient_ids:
+        try:
+            data = cb.getAllClinicalDataOfPatientInStudy(study_id, pid)
+            if not data:
+                continue
+
+            df = pd.DataFrame(data) if isinstance(data, list) else data
+            if df.empty or 'clinicalAttributeId' not in df.columns:
+                continue
+
+            # Vectorized dictionary construction
+            patient_dict = {'patient_id': pid}
+            patient_dict.update(dict(zip(df['clinicalAttributeId'], df['value'])))
+            patient_details.append(patient_dict)
+
+        except Exception as e:
+            # Optional: log or skip individual patient errors silently
+            continue
+
+    return patient_details
+
+# ---------------------------
+# Caching frequently repeated calls
+# ---------------------------
+@lru_cache(maxsize=None)
+def get_all_studies():
+    st_df = cb.getAllStudies()
+    return pd.DataFrame(st_df) if isinstance(st_df, list) else st_df
+
+@lru_cache(maxsize=None)
+def get_clinical_data(study_id):
+    data = cb.getAllClinicalDataInStudy(study_id)
+    return pd.DataFrame(data) if isinstance(data, list) else data
+
+@lru_cache(maxsize=None)
+def get_mutations(study_id):
+    mu = cb.getMutationsInMolecularProfile(study_id, study_id)
+    return pd.DataFrame(mu) if isinstance(mu, list) else mu
+
+# ---------------------------
+# Helper: Process a single study
+# ---------------------------
+def process_study(study_row, progress_queue):
+    study_id, study_name = study_row['studyId'], study_row['name']
+
+    try:
+        progress_queue.append(f"Fetching mutations for {study_id}...")
+        mu = get_mutations(study_id)
+        if mu.empty:
+            return None
+
+        # Vectorized: much faster than .apply()
+        mu = mu.assign(
+            gene=[g['hugoGeneSymbol'] for g in mu['gene']],
+            patient_id=mu['patientId']
+        )
+
+        progress_queue.append(f"{study_id}: {len(mu)} mutations retrieved.")
+
+        # Clinical data
+        clinical_df = get_clinical_data(study_id)
+        if not clinical_df.empty and 'patientId' in clinical_df.columns:
+            clinical_pivot = (
+                clinical_df.pivot_table(
+                    index='patientId',
+                    columns='clinicalAttributeId',
+                    values='value',
+                    aggfunc='first'
+                ).reset_index()
+            )
+        else:
+            clinical_pivot = pd.DataFrame(columns=['patientId'])
+
+        merged = mu[['patient_id', 'gene']].merge(
+            clinical_pivot, left_on='patient_id', right_on='patientId', how='left'
+        )
+
+        # Fetch patient details in parallel
+        unique_patients = mu['patient_id'].unique().tolist()
+        batch_size = 200
+        patient_batches = [unique_patients[i:i+batch_size] for i in range(0, len(unique_patients), batch_size)]
+
+        patient_details = []
+        progress_queue.append(f"{study_id}: fetching {len(unique_patients)} patients...")
+
+        with ThreadPoolExecutor(max_workers=20) as executor:
+            futures = [executor.submit(fetch_patient_batch, batch, study_id) for batch in patient_batches]
+            for future in as_completed(futures):
+                try:
+                    batch_result = future.result()
+                    if batch_result:
+                        patient_details.extend(batch_result)
+                except Exception:
+                    continue
+
+        patient_details_df = pd.DataFrame(patient_details)
+        if not patient_details_df.empty:
+            merged = merged.merge(patient_details_df, on='patient_id', how='left')
+
+        merged['study_id'] = study_id
+        merged['study_name'] = study_name
+        progress_queue.append(f"{study_id}: completed with {len(merged)} records.")
+
+        return merged
+
+    except Exception as e:
+        progress_queue.append(f"Error processing {study_id}: {e}")
+        return None
+
+
+
+def fetch_cbio_data(keyword: str, num_studies: int = 0):
+    """
+    Fetch cBioPortal data with optional study limit.
+    Uses study-ID-based caching: 
+    """
+    try:     
+        st.info("📦 Fetching studies...")        
+        # 1. Get all studies from cBioPortal
+        st_df = cb.getAllStudies()
+        if isinstance(st_df, list):
+            st_df = pd.DataFrame(st_df)
+
+        filtered = st_df[
+            st_df['studyId'].str.contains(keyword, case=False, na=False) |
+            st_df['name'].str.contains(keyword, case=False, na=False)
+        ]
+
+        if filtered.empty:
+            st.error("❌ No studies found.")
+            return None
+
+        total_studies = len(filtered)
+
+        if num_studies > 0:
+            filtered = filtered.head(num_studies)
+            st.success(f"📊 Processing {len(filtered)} of {total_studies} studies")
+        else:
+            st.success(f"📊 Processing all {total_studies} studies")
+
+        
+        # 2. Determine which studies are already cached
+        st.info("📦 Checking cache...")
+        cached_study_ids = []
+        cached_data_frames = []
+
+        for study_id in filtered["studyId"].tolist():
+            cached = cache_manager.load_study_data(study_id)
+            if cached["found"]:
+                cached_study_ids.append(study_id)
+                cached_data_frames.append(cached["df_raw"])
+                st.success(f"Loaded cached study {study_id}")
+
+        
+        # 3. New studies to Fetch        
+        studies_to_fetch = filtered[~filtered["studyId"].isin(cached_study_ids)]
+        st.info(f"{len(studies_to_fetch)} new studies to fetch")
+
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        all_new_data = []
+        # new_data_frames = []
+        
+        for idx, (_, study_row) in enumerate(studies_to_fetch.iterrows()):
+            study_id = study_row['studyId']
+            study_name = study_row['name']
+            
+            try:
+                status_text.info(f"Fetching {idx+1}/{len(studies_to_fetch)}: {study_id}")
+                
+                mu = cb.getMutationsInMolecularProfile(study_id, study_id)
+                if isinstance(mu, list) and len(mu) > 0:
+                    mu = pd.DataFrame(mu)
+                if mu.empty:
+                    continue
+                
+                mu['gene'] = mu['gene'].apply(lambda x: x['hugoGeneSymbol'])
+                mu['patient_id'] = mu['patientId']
+                
+                mu_clinical = cb.getAllClinicalDataInStudy(study_id)
+                if isinstance(mu_clinical, list):
+                    mu_clinical = pd.DataFrame(mu_clinical)
+                
+                if not mu_clinical.empty and 'patientId' in mu_clinical.columns:
+                    clinical_pivot = mu_clinical.pivot_table(
+                        index='patientId',
+                        columns='clinicalAttributeId',
+                        values='value',
+                        aggfunc='first'
+                    ).reset_index()
+                    clinical_pivot.columns.name = None
+                else:
+                    clinical_pivot = pd.DataFrame(columns=['patientId'])
+                
+                merged = mu[['patient_id', 'gene']].merge(
+                    clinical_pivot,
+                    left_on='patient_id',
+                    right_on='patientId',
+                    how='left'
+                )
+                
+                unique_patients = mu['patient_id'].unique().tolist()
+                batch_size = 200
+                patient_batches = [unique_patients[i:i+batch_size] for i in range(0, len(unique_patients), batch_size)]
+                
+                patient_details = []
+                with ThreadPoolExecutor(max_workers=30) as executor:
+                    futures = [executor.submit(fetch_patient_batch, batch, study_id) for batch in patient_batches]
+                    for future in as_completed(futures):
+                        try:
+                            patient_details.extend(future.result())
+                        except:
+                            continue
+                
+                patient_details_df = pd.DataFrame(patient_details)
+                if not patient_details_df.empty:
+                    final = merged.merge(
+                        patient_details_df,
+                        on='patient_id',
+                        how='left',
+                        suffixes=('', '_extra')
+                    )
+                else:
+                    final = merged
+                
+                final['study_id'] = study_id
+                final['study_name'] = study_name
+                
+                # Step 4: Cache this study immediately
+                metadata = {
+                    'study_id': study_id,
+                    'raw_records': len(final),
+                    'clean_records': 0,
+                    'subtypes': final['CANCER_TYPE_DETAILED'].nunique() if 'CANCER_TYPE_DETAILED' in final.columns else 0,
+                    'total_patients': final['patient_id'].nunique()
+                }
+                cache_manager.save_study_data(study_id, final, final, metadata)
+                
+                all_new_data.append(final)
+                status_text.success(f"Fetched {len(final)} records for {study_id}")
+                
+            except Exception as e:
+                status_text.warning(f"Error fetching {study_id}: {str(e)}")
+                continue
+            
+            progress_bar.progress((idx + 1) / len(studies_to_fetch))
+        
+        progress_bar.empty()
+        status_text.empty()
+        
+        # Step 5: Combine cached + new data
+        merged_data = []
+
+        if cached_data_frames:
+            merged_data.append(pd.concat(cached_data_frames, ignore_index=True))
+
+        if all_new_data:
+            merged_data.append(pd.concat(all_new_data, ignore_index=True))
+
+        if not merged_data:
+            st.error("❌ No data available.")
+            return None
+
+        result = pd.concat(merged_data, ignore_index=True)
+        
+        # Ensure required columns
+        if 'CANCER_TYPE_DETAILED' not in result.columns:
+            result['CANCER_TYPE_DETAILED'] = result.get('CANCER_TYPE', 'Unknown')
+        if 'patientId' not in result.columns and 'patient_id' in result.columns:
+            result['patientId'] = result['patient_id']
+        
+        priority_cols = ['study_id', 'study_name', 'patient_id', 'patientId', 'gene',
+                         'CANCER_TYPE', 'CANCER_TYPE_DETAILED', 'OS_STATUS', 'OS_MONTHS',
+                         'AGE', 'SEX', 'GENDER']
+        other_cols = [col for col in result.columns if col not in priority_cols]
+        final_cols = [col for col in priority_cols if col in result.columns] + other_cols
+        result = result[final_cols]
+        
+        return result
+    
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
+        traceback.print_exc()
+        return None
+    
+# ============================================================================
+# MESH STANDARDIZATION - AZURE OPENAI WITH ROBUST PROMPT
+# ============================================================================
+def standardize_mesh_backend(df, min_patients, min_percentage):
+    """
+    Robust standardization - REMOVES generic cancer names like "Ovarian Cancer"
+    WITH CACHING: Updates cache with cleaned data after standardization
+    """
+    try:
+        if not config.AZURE_OPENAI_API_KEY or not config.AZURE_OPENAI_ENDPOINT:
+            st.error("Azure OpenAI credentials required")
+            return None
+        
+        azure_client = AzureOpenAI(
+            api_key=config.AZURE_OPENAI_API_KEY,
+            api_version=config.AZURE_API_VERSION,
+            azure_endpoint=config.AZURE_OPENAI_ENDPOINT
+        )
+        
+        if 'CANCER_TYPE_DETAILED' not in df.columns:
+            st.error("CANCER_TYPE_DETAILED column not found")
+            return None
+        
+        # Pre-filter: Remove generic cancer names BEFORE AI processing
+        generic_patterns = [
+            r'^ovarian cancer$',
+            r'^pancreatic cancer$',
+            r'^lung cancer$',
+            r'^breast cancer$',
+            r'^colorectal cancer$',
+            r'^colon cancer$',
+            r'^rectal cancer$',
+            r'^prostate cancer$',
+            r'^bladder cancer$',
+            r'^kidney cancer$',
+            r'^liver cancer$',
+            r'^stomach cancer$',
+            r'^gastric cancer$',
+            r'^esophageal cancer$',
+            r'^cervical cancer$',
+            r'^uterine cancer$',
+            r'^endometrial cancer$',
+            r'^melanoma$',
+            r'^leukemia$',
+            r'^lymphoma$',
+            r'^myeloma$',
+            r'^sarcoma$',
+            r'^glioma$',
+            r'^glioblastoma$',
+            r'^cancer$',
+            r'^carcinoma$',
+            r'^tumor$',
+            r'^tumour$',
+            r'^malignancy$',
+            r'^neoplasm$'
+        ]
+        
+        def is_generic(cancer_name):
+            """Check if cancer name is too generic"""
+            if pd.isna(cancer_name):
+                return True
+            name_lower = str(cancer_name).strip().lower()
+            for pattern in generic_patterns:
+                if re.match(pattern, name_lower):
+                    return True
+            return False
+        
+        # Mark generic subtypes
+        df['is_generic'] = df['CANCER_TYPE_DETAILED'].apply(is_generic)
+        
+        # Calculate thresholds
+        subtype_counts = df[~df['is_generic']]['CANCER_TYPE_DETAILED'].value_counts()
+        total_patients = len(df)
+        count_threshold = max(min_patients, int(total_patients * min_percentage / 100))
+        
+        rare_subtypes = subtype_counts[subtype_counts < count_threshold].index.tolist()
+        common_subtypes = subtype_counts[subtype_counts >= count_threshold].index.tolist()
+        
+        st.info(f"📊 Pre-filtered: Removed {df['is_generic'].sum()} generic entries")
+        st.info(f"📊 Found {len(common_subtypes)} specific subtypes (≥{count_threshold} patients)")
+        
+        if not common_subtypes:
+            st.warning("No specific subtypes found")
+            return None
+        
+        # AI Standardization prompt
+        hierarchical_prompt = """Medical ontologist. Standardize cancer subtype names PRESERVING all distinctions.
+
+## RULES:
+1. Keep ALL different cancer types separate (Ovarian ≠ Breast ≠ Lung)
+2. Keep ALL grades separate (High-Grade ≠ Low-Grade)
+3. Keep ALL histologies separate (Serous ≠ Mucinous ≠ Clear Cell ≠ Endometrioid)
+4. Only fix spelling/formatting
+
+## EXAMPLES:
+✓ "High-Grade Serous Ovarian" → "High-Grade Serous Ovarian Carcinoma"
+✓ "Low-Grade Serous Ovarian" → "Low-Grade Serous Ovarian Carcinoma"
+✓ "Clear Cell Ovarian" → "Clear Cell Ovarian Carcinoma"
+✓ "Endometrioid Ovarian" → "Endometrioid Ovarian Carcinoma"
+
+Return JSON: {"original": "standardized"}
+"""
+        
+        batch_size = 20
+        all_mappings = {}
+        
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        num_batches = (len(common_subtypes) + batch_size - 1) // batch_size
+        
+        for batch_idx in range(num_batches):
+            start_idx = batch_idx * batch_size
+            end_idx = min(start_idx + batch_size, len(common_subtypes))
+            batch = common_subtypes[start_idx:end_idx]
+            
+            status_text.info(f"Batch {batch_idx + 1}/{num_batches}")
+            
+            prompt = f"""{hierarchical_prompt}
+
+Subtypes:
+{json.dumps(batch, indent=2)}
+
+Return JSON only."""
+
+            try:
+                response = azure_client.chat.completions.create(
+                    model=config.AZURE_DEPLOYMENT_NAME,
+                    messages=[
+                        {"role": "system", "content": "Medical ontologist. Preserve distinctions. JSON only."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.02,
+                    max_tokens=4000,
+                    response_format={"type": "json_object"}
+                )
+                
+                batch_mappings = json.loads(response.choices[0].message.content)
+                all_mappings.update(batch_mappings)
+                
+            except Exception as e:
+                for subtype in batch:
+                    all_mappings[subtype] = subtype
+            
+            progress_bar.progress((batch_idx + 1) / num_batches)
+            time.sleep(0.5)
+        
+        progress_bar.empty()
+        status_text.empty()
+        
+        # Apply mappings
+        df_result = df[~df['is_generic']].copy()
+        df_result['CANCER_SUBTYPE_STANDARDIZED'] = df_result['CANCER_TYPE_DETAILED'].apply(
+            lambda x: all_mappings.get(x, 'RARE_SUBTYPE') if x not in rare_subtypes else 'RARE_SUBTYPE'
+        )
+        
+        df_result = df_result[df_result['CANCER_SUBTYPE_STANDARDIZED'] != 'RARE_SUBTYPE'].copy()
+        
+        final_subtypes = df_result['CANCER_SUBTYPE_STANDARDIZED'].nunique()
+        retention_rate = (len(df_result) / len(df)) * 100
+        
+        st.success(f"✅ Standardization Complete:")
+        st.success(f"   • Specific subtypes: {len(common_subtypes)}")
+        st.success(f"   • Final subtypes: {final_subtypes}")
+        st.success(f"   • Retention: {len(df_result):,} / {len(df):,} ({retention_rate:.1f}%)")
+        
+        with st.expander("📋 View Standardization Results"):
+            mapping_examples = []
+            for orig, std in list(all_mappings.items())[:50]:
+                mapping_examples.append({
+                    'Original': orig,
+                    'Standardized': std,
+                    'Patients': int(subtype_counts.get(orig, 0))
+                })
+            
+            df_mapping = pd.DataFrame(mapping_examples).sort_values('Patients', ascending=False)
+            st.dataframe(df_mapping, use_container_width=True, height=400, hide_index=True)
+        
+        # 💾 Update cache with cleaned data
+        st.info("💾 Updating study caches...")
+        updated = 0
+
+        for study_id, df_study_clean in df_result.groupby("study_id"):
+            try:
+                # Load existing raw cache for this study
+                cache_entry = cache_manager.load_study_data(study_id)
+                df_raw = cache_entry["df_raw"] if cache_entry["found"] else df_study_clean.copy()
+
+                metadata = {
+                    "study_id": study_id,
+                    "raw_records": len(df_raw),
+                    "clean_records": len(df_study_clean),
+                    "subtypes": df_study_clean["CANCER_SUBTYPE_STANDARDIZED"].nunique(),
+                    "total_patients": df_study_clean["patientId"].nunique(),
+                    "standardized": True
+                }
+
+                cache_manager.save_study_data(
+                    study_id=study_id,
+                    df_raw=df_raw,
+                    df_clean=df_study_clean,
+                    metadata=metadata
+                )
+                updated += 1
+
+            except Exception as e:
+                st.warning(f"Could not update cache for study {study_id}: {str(e)}")
+
+        st.success(f"✅ Cache updated for {updated} studies")
+
+        return df_result
+        
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
+        traceback.print_exc()
+        df_fallback = df.copy()
+        df_fallback['CANCER_SUBTYPE_STANDARDIZED'] = df_fallback['CANCER_TYPE_DETAILED']
+        return df_fallback
+
+# ============================================================================
+# GENE FREQUENCY CALCULATION WITH DUAL SELECTION
+# ============================================================================
+
+def calculate_gene_freq_with_dual_selection(df_clean, top_n_overall=10, top_n_per_subtype=5, selection_mode='union'):
+    """
+    Calculate gene frequencies with dual selection modes
+    Supports: subtype, union, intersection
+    """
+    try:
+        gene_count = df_clean.groupby(['CANCER_SUBTYPE_STANDARDIZED', 'gene'])['patientId'].nunique().reset_index(name='unique_patients_with_gene')
+        total_pat = df_clean.groupby('CANCER_SUBTYPE_STANDARDIZED')['patientId'].nunique().reset_index(name='total_patients_in_subtype')
+        
+        df_freq = pd.merge(gene_count, total_pat, on='CANCER_SUBTYPE_STANDARDIZED')
+        df_freq['gene_frequency_in_subtype_pct'] = (df_freq['unique_patients_with_gene'] / df_freq['total_patients_in_subtype'] * 100).round(2)
+        
+        overall_gene_count = df_clean.groupby('gene')['patientId'].nunique().reset_index(name='unique_patients_overall')
+        total_patients_overall = df_clean['patientId'].nunique()
+        overall_gene_count['total_patients_overall'] = total_patients_overall
+        overall_gene_count['gene_frequency_overall_pct'] = (overall_gene_count['unique_patients_overall'] / total_patients_overall * 100).round(2)
+        
+        df_gene_frequencies = pd.merge(df_freq, overall_gene_count, on='gene', how='left')
+        
+        # Top genes by overall frequency
+        top_genes_overall = overall_gene_count.sort_values('gene_frequency_overall_pct', ascending=False)['gene'].head(top_n_overall).tolist()
+        
+        # Top genes per subtype
+        subtype_top_genes = {}
+        subtype_specific_genes = []
+        
+        for subtype in df_gene_frequencies['CANCER_SUBTYPE_STANDARDIZED'].unique():
+            subtype_data = df_gene_frequencies[df_gene_frequencies['CANCER_SUBTYPE_STANDARDIZED'] == subtype].copy()
+            subtype_data = subtype_data.sort_values('gene_frequency_in_subtype_pct', ascending=False)
+            top_genes_for_subtype = subtype_data['gene'].head(top_n_per_subtype).tolist()
+            subtype_top_genes[subtype] = top_genes_for_subtype
+            subtype_specific_genes.extend(top_genes_for_subtype)
+        
+        unique_subtype_genes = list(dict.fromkeys(subtype_specific_genes))
+        
+        # Select based on mode
+        if selection_mode == 'subtype':
+            final_gene_list = unique_subtype_genes
+        elif selection_mode == 'union':
+            final_gene_list = list(dict.fromkeys(top_genes_overall + unique_subtype_genes))
+        else:  # intersection
+            final_gene_list = list(set(top_genes_overall) & set(unique_subtype_genes))
+            if len(final_gene_list) == 0:
+                st.warning("⚠️ Intersection mode resulted in 0 genes. Using union instead.")
+                final_gene_list = list(dict.fromkeys(top_genes_overall + unique_subtype_genes))
+        
+        # Create pivot table
+        df_pivot = df_gene_frequencies.pivot_table(
+            index='gene',
+            columns='CANCER_SUBTYPE_STANDARDIZED',
+            values='gene_frequency_in_subtype_pct',
+            fill_value=0
+        ).reset_index()
+        
+        overall = df_gene_frequencies[['gene', 'gene_frequency_overall_pct']].drop_duplicates()
+        df_pivot = df_pivot.merge(overall, on='gene')
+        
+        cols = ['gene', 'gene_frequency_overall_pct'] + [c for c in df_pivot.columns if c not in ['gene', 'gene_frequency_overall_pct']]
+        df_pivot = df_pivot[cols].rename(columns={'gene_frequency_overall_pct': 'OVERALL_%'})
+        df_pivot = df_pivot.sort_values('OVERALL_%', ascending=False).reset_index(drop=True)
+        
+        selection_details = {
+            'mode': selection_mode,
+            'top_genes_overall': top_genes_overall,
+            'subtype_top_genes': subtype_top_genes,
+            'unique_subtype_genes': unique_subtype_genes,
+            'final_gene_list': final_gene_list
+        }
+        
+        return df_pivot, final_gene_list, selection_details, df_gene_frequencies
+        
+    except Exception as e:
+        st.error(f"Gene frequency error: {str(e)}")
+        traceback.print_exc()
+        return pd.DataFrame(), [], {}, pd.DataFrame()
+
+
+# ============================================================================
+# CLINICAL TRIALS BACKEND
+# ============================================================================
+def fetch_clinical_trials_exhaustive(biomarkers, condition):
+    """Exhaustive clinical trial search with all biomarkers and phases"""
+    all_trials = []
+    indication = condition.split()[0] if condition else ""
+    
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    for idx, biomarker in enumerate(biomarkers):
+        try:
+            status_text.info(f"Searching {idx+1}/{len(biomarkers)}: {biomarker}")
+            
+            base_url = "https://clinicaltrials.gov/api/v2/studies"
+            page_token = None
+            page_num = 1
+            biomarker_trials = []
+            
+            while True:
+                params = {
+                    "format": "json",
+                    "query.cond": f"{indication.replace(' ', '+')}+AND+{biomarker.replace(' ', '+')}",
+                    "query.term": "(AREA[Phase]PHASE1 OR AREA[Phase]PHASE2 OR AREA[Phase]PHASE3)",
+                    "filter.overallStatus": "RECRUITING,ACTIVE_NOT_RECRUITING",
+                    "pageSize": 100
+                }
+                
+                if page_token:
+                    params["pageToken"] = page_token
+                
+                resp = requests.get(base_url, params=params, timeout=15)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    studies = data.get("studies", [])
+                    
+                    if not studies:
+                        break
+                    
+                    for study in studies:
+                        protocol = study.get("protocolSection", {})
+                        sponsor_info = protocol.get("sponsorCollaboratorsModule", {})
+                        
+                        lead_sponsor_info = sponsor_info.get("leadSponsor", {})
+                        if not lead_sponsor_info:
+                            continue
+                        
+                        sponsor_class = lead_sponsor_info.get("class", "")
+                        sponsor_name = lead_sponsor_info.get("name", "N/A")
+                        
+                        if sponsor_class == "INDUSTRY":
+                            status_info = protocol.get("statusModule", {})
+                            design_info = protocol.get("designModule", {})
+                            nct_id = protocol.get("identificationModule", {}).get("nctId", "N/A")
+                            
+                            # ENSURE CLEAN URL FORMAT
+                            clean_nct_id = str(nct_id).strip()
+                            
+                            biomarker_trials.append({
+                                "Biomarker": biomarker,
+                                "NCT ID": clean_nct_id,
+                                "NCT URL": f"https://clinicaltrials.gov/study/{clean_nct_id}",
+                                "Title": protocol.get("identificationModule", {}).get("briefTitle", "N/A"),
+                                "Phase": ", ".join(design_info.get("phases", [])) if design_info.get("phases") else "NOT_SPECIFIED",
+                                "Status": status_info.get("overallStatus", "N/A"),
+                                "Start Date": status_info.get("startDateStruct", {}).get("date", "N/A"),
+                                "Completion Date": status_info.get("primaryCompletionDateStruct", {}).get("date", "N/A"),
+                                "Lead Sponsor": sponsor_name
+                            })
+                    
+                    page_token = data.get("nextPageToken")
+                    if not page_token:
+                        break
+                    
+                    page_num += 1
+                    time.sleep(0.3)
+                else:
+                    break
+            
+            all_trials.extend(biomarker_trials)
+            status_text.success(f"  {biomarker}: {len(biomarker_trials)} trials")
+            
+        except Exception as e:
+            status_text.warning(f"  Error: {biomarker}")
+            continue
+        
+        progress_bar.progress((idx + 1) / len(biomarkers))
+        time.sleep(0.2)
+    
+    progress_bar.empty()
+    status_text.empty()
+    
+    return pd.DataFrame(all_trials) if all_trials else None
+
+        
+# ============================================================================
+# MARKET CAP BACKEND WITH TAVILY + AZURE OPENAI
+# ============================================================================
+
+def get_market_cap_tavily_simple(company_name):
+    """Fetch market cap using Tavily + Azure OpenAI"""
+    try:
+        if not config.TAVILY_API_KEY:
+            return None
+        
+        tavily_url = "https://api.tavily.com/search"
+        search_query = f"{company_name} pharmaceutical company market capitalization 2024 2025"
+        
+        tavily_payload = {
+            "api_key": config.TAVILY_API_KEY,
+            "query": search_query,
+            "search_depth": "basic",
+            "max_results": 3,
+            "include_answer": True,
+            "include_raw_content": False
+        }
+        
+        response = requests.post(tavily_url, json=tavily_payload, timeout=10)
+        
+        if response.status_code != 200:
+            return None
+        
+        data = response.json()
+        results = data.get('results', [])
+        answer = data.get('answer', '')
+        
+        if not results and not answer:
+            return None
+        
+        combined_text = f"Answer: {answer}\n\n"
+        for result in results[:3]:
+            combined_text += f"Content: {result.get('content', '')}\n\n"
+        
+        if not config.AZURE_OPENAI_API_KEY:
+            return None
+        
+        azure_client = AzureOpenAI(
+            api_key=config.AZURE_OPENAI_API_KEY,
+            api_version=config.AZURE_API_VERSION,
+            azure_endpoint=config.AZURE_OPENAI_ENDPOINT
+        )
+        
+        extraction_prompt = f"""Extract market cap for {company_name}:
+
+{combined_text[:2000]}
+
+Return JSON:
+{{
+    "market_cap_billions": number in billions USD,
+    "found": true/false
+}}
+"""
+        
+        extraction_response = azure_client.chat.completions.create(
+            model=config.AZURE_DEPLOYMENT_NAME,
+            messages=[
+                {"role": "system", "content": "Extract market cap. Return JSON."},
+                {"role": "user", "content": extraction_prompt}
+            ],
+            temperature=0.1,
+            response_format={"type": "json_object"}
+        )
+        
+        extracted_data = json.loads(extraction_response.choices[0].message.content)
+        
+        if not extracted_data.get('found', False):
+            return None
+        
+        market_cap_b = extracted_data.get('market_cap_billions')
+        
+        if market_cap_b:
+            return {
+                'market_cap_b': round(market_cap_b, 2),
+                'market_cap': market_cap_b * 1e9
+            }
+        
+        return None
+        
+    except Exception as e:
+        return None
+ 
+# ============================================================================
+# SIDEBAR CONTROLS
+# ============================================================================
+
+
+with st.sidebar:
+    st.markdown("## ⚙️ Configuration Panel")
+    
+    st.markdown("---")
+    st.markdown("### 📥 Data Source")
+    
+    keyword = st.text_input(
+        "Cancer Type Keyword",
+        value="ovarian",
+        help="Search term for cBioPortal studies"
+    )
+    
+    st.session_state.condition_keyword = keyword
+    
+    # Get total available studies dynamically
+    if st.button("🔍 Check Available Studies", use_container_width=True):
+        with st.spinner("Checking studies..."):
+            total_studies = get_total_studies_count(keyword)
+            st.session_state.total_available_studies = total_studies
+            st.success(f"Found {total_studies} studies")
+    
+    # Dynamic study slider
+    if st.session_state.total_available_studies > 0:
+        max_studies = st.session_state.total_available_studies
+    else:
+        max_studies = 30
+    
+    st.markdown("### 📊 Study Selection")
+    num_studies = st.slider(
+        "Number of Studies",
+        min_value=0,
+        max_value=max_studies,
+        value=0,
+        step=1,
+        help=f"0 = All studies (max: {max_studies})"
+    )
+    
+    if num_studies == 0:
+        st.info(f"Processing all studies")
+    else:
+        st.info(f"Processing {num_studies} of {max_studies} studies")
+    
+    st.markdown("### ⚙️ Standardization")
+    st.info("Using Azure OpenAI for robust standardization")
+    
+    min_patients = st.slider("Minimum Patients", 1, 20, 5)
+    min_percentage = st.slider("Minimum %", 0.1, 5.0, 0.1, 0.1)
+    
+    st.markdown("### 🧬 Gene Selection")
+    
+    selection_mode = st.radio(
+        "Strategy",
+        options=['subtype', 'union', 'intersection'],
+        format_func=lambda x: {
+            'subtype': '🎯 Subtype-Specific',
+            'union': '🔄 Union (Comprehensive)',
+            'intersection': '⚡ Intersection (Conservative)'
+        }[x],
+        index=1,
+        help="Choose gene selection strategy"
+    )
+    
+    if selection_mode == 'subtype':
+        top_n_per_subtype = st.slider("Top N per Subtype", 3, 15, 5, 1)
+        top_n_overall = 10
+    elif selection_mode == 'union':
+        col1, col2 = st.columns(2)
+        with col1:
+            top_n_overall = st.slider("Overall", 5, 20, 10, 5)
+        with col2:
+            top_n_per_subtype = st.slider("Subtype", 3, 10, 5, 1)
+    else:  # intersection
+        col1, col2 = st.columns(2)
+        with col1:
+            top_n_overall = st.slider("Overall", 5, 20, 10, 5)
+        with col2:
+            top_n_per_subtype = st.slider("Subtype", 3, 10, 5, 1)
+    
+    st.markdown("---")
+    st.markdown("### 💊 Drug Mapping File")
+    
+    # Load FDA drug-biomarker mapping
+    
+    
+    
+    try:
+        static_file_path = os.path.join("static", "drugsatfda.xlsx")
+        
+        if os.path.exists(static_file_path):
+            st.session_state.df_bm = pd.read_excel(static_file_path)
+            st.success(f"✅ Loaded {len(st.session_state.df_bm):,} drug-biomarker mappings")
+        else:
+            st.error(f"⚠️ Drug mapping file not found at: {static_file_path}")
+            st.info("Please ensure drugsatfda.xlsx is in the static/ directory")
+            
+    except Exception as e:
+        st.error(f"Error loading drug mapping file: {str(e)}")
+    
+
+    # Load cached studies
+    st.markdown("### 💾 Cache Management")
+
+    cached_studies = cache_manager.list_cached_studies()
+
+    if len(cached_studies) > 0:
+        st.success(f"🗄 {len(cached_studies)} cached studies available")
+
+        for entry in cached_studies:
+            study_id = entry["study_id"]
+            raw_n = entry["raw_records"]
+            clean_n = entry["clean_records"]
+            cached_at = entry["cached_at"]
+
+            with st.expander(f"{study_id}"):
+                st.caption(f"Raw: {raw_n:,} | Clean: {clean_n:,}")
+                st.caption(f"Cached: {cached_at}")
+
+                if st.button(f"🗑 Clear {study_id}", key=f"clear_{study_id}"):
+                    cache_manager.clear_study_cache(study_id)
+                    st.rerun()
+    else:
+        st.info("📦 No cached studies found")
+
+
+    # Always allow clearing all cache
+    if st.button("🗑️ Clear ALL Cache", use_container_width=True, type="secondary"):
+        if cache_manager.clear_all_cache():   # you should add this helper (see below)
+            st.success("✅ All cache cleared")
+            st.rerun()
+
+    st.markdown("---")
+    
+    # Execute Pipeline Button
+    if st.button("🚀 Execute Pipeline", type="primary", use_container_width=True):
+        if st.session_state.df_bm is None:
+            st.error("⚠️ Upload drug mapping file first")
+        else:
+            st.session_state.processing_done = False
+            
+            progress_placeholder = st.empty()
+            status_placeholder = st.empty()
+            
+            try:
+                # Step 1: cBioPortal
+                status_placeholder.info("Step 1/6: cBioPortal data extraction")
+                progress_placeholder.progress(0.17)
+                df_raw = fetch_cbio_data(keyword, num_studies=num_studies)
+                if df_raw is None:
+                    st.error("Failed to fetch data")
+                    st.stop()
+                st.session_state.df_raw_cbio = df_raw
+                
+                # Step 2: Azure OpenAI Standardization
+                status_placeholder.info("Step 2/6: Azure OpenAI standardization")
+                progress_placeholder.progress(0.33)
+                df_clean = standardize_mesh_backend(df_raw, min_patients, min_percentage,)
+                if df_clean is None or df_clean.empty:
+                    st.error("Standardization failed")
+                    st.stop()
+
+                # Check if important subtypes are preserved
+                final_subtypes = df_clean['CANCER_SUBTYPE_STANDARDIZED'].nunique()
+                if final_subtypes < 3:
+                    st.warning("⚠️ Very few subtypes retained. Consider lowering minimum patient threshold.")
+
+                st.session_state.df_clean = df_clean
+                
+                # Step 3: Gene selection
+                status_placeholder.info(f"Step 3/6: Gene selection ({selection_mode})")
+                progress_placeholder.progress(0.50)
+                df_pivot, unique_genes, selection_details, df_gene_freq = calculate_gene_freq_with_dual_selection(
+                    df_clean,
+                    top_n_overall=top_n_overall,
+                    top_n_per_subtype=top_n_per_subtype,
+                    selection_mode=selection_mode
+                )
+                st.session_state.df_pivot = df_pivot
+                st.session_state.selected_biomarkers = unique_genes
+                st.session_state.selection_details = selection_details
+                st.session_state.df_gene_frequencies = df_gene_freq
+                
+                if not unique_genes:
+                    st.error("No genes selected")
+                    st.stop()
+                
+                # Step 4: Drug matching
+                status_placeholder.info("Step 4/6: Drug-biomarker matching")
+                progress_placeholder.progress(0.67)
+                drug_list, drug_biomarker_map = fuzzy_match_backend(unique_genes, st.session_state.df_bm)
+                st.session_state.drug_list = drug_list
+                st.session_state.drug_biomarker_map = drug_biomarker_map
+                
+                # Step 5: FDA data
+                status_placeholder.info("Step 5/6: FDA data will load on demand")
+                progress_placeholder.progress(0.83)
+
+                # Create an empty placeholder for later lazy-load
+                st.session_state.df_fda_comprehensive = {}
+                
+                # Step 6: Clinical trials
+                status_placeholder.info(f"Step 6/6: Clinical trials ({len(unique_genes)} genes)")
+                progress_placeholder.progress(0.95)
+                df_trials = fetch_clinical_trials_exhaustive(unique_genes, keyword + " Cancer")
+                st.session_state.df_clinical_trials = df_trials
+                
+                progress_placeholder.progress(1.0)
+                status_placeholder.success("✅ Pipeline complete")
+                st.session_state.processing_done = True
+                st.balloons()
+                
+                time.sleep(2)
+                progress_placeholder.empty()
+                status_placeholder.empty()
+                
+            except Exception as e:
+                st.error(f"Pipeline error: {str(e)}")
+                st.exception(e)
+    
+    st.markdown("---")
+    st.markdown("### 📊 Pipeline Status")
+    
+    if st.session_state.processing_done:
+        st.success("✅ Ready")
+        if st.session_state.df_clean is not None:
+            st.metric("Records", f"{len(st.session_state.df_clean):,}")
+        if st.session_state.selected_biomarkers:
+            st.metric("Genes", len(st.session_state.selected_biomarkers))
+        if st.session_state.drug_list:
+            st.metric("Drugs", len(st.session_state.drug_list))
+    else:
+        st.warning("⏳ Configure & Execute")
+    
+    st.markdown("---")
+    st.markdown(f"""
+    <div style="text-align: center; font-size: 0.8rem; color: #666;">
+        <p><strong>User:</strong> pulkit-079</p>
+        <p><strong>Date:</strong> 2025-11-05 20:46:57 UTC</p>
+        <p><strong>Version:</strong> 4.2.0</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+# ============================================================================
+# MAIN CONTENT GUARD
+# ============================================================================
+
+if not st.session_state.processing_done:
+    st.info("👈 Configure parameters and execute pipeline to begin analysis")
+    st.stop()
+
+
+# ============================================================================
+# CREATE TABS
+# ============================================================================
+
+tab_exec, tab_gene, tab_trials, tab_sponsor, tab_fda = st.tabs([
+    "📊 Executive Summary",
+    "🧬 Gene Analysis",
+    "🔬 Clinical Trials",
+    "🏢 Sponsor Intelligence",
+    "💊 FDA Database"
+])
+
+# ============================================================================
+# EXECUTIVE SUMMARY TAB - ALL FIXES APPLIED
+# ============================================================================
+
+
+
+
+with tab_exec:
+    st.markdown('<h2 class="section-header">Executive Summary</h2>', unsafe_allow_html=True)
+    
+    if st.session_state.df_clean is None or st.session_state.selected_biomarkers is None:
+        st.warning("No data available")
+        st.stop()
+    
+    
+        # Professional KPI Metrics (KEEP THIS)
+    col1, col2, col3, col4 = st.columns(4)
+        
+    with col1:
+        total_patients = st.session_state.df_clean['patientId'].nunique()
+        st.markdown(f"""
+        <div class="metric-card">
+            <h3>{total_patients:,}</h3>
+            <p>Total Patients</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        total_genes = len(st.session_state.selected_biomarkers)
+        st.markdown(f"""
+        <div class="metric-card orange">
+            <h3>{total_genes}</h3>
+            <p>Selected Genes</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        drug_count = len(st.session_state.drug_list) if st.session_state.drug_list else 0
+        st.markdown(f"""
+        <div class="metric-card blue">
+            <h3>{drug_count}</h3>
+            <p>Mapped Drugs</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col4:
+        trial_count = len(st.session_state.df_clinical_trials) if st.session_state.df_clinical_trials is not None else 0
+        st.markdown(f"""
+        <div class="metric-card yellow">
+            <h3>{trial_count:,}</h3>
+            <p>Active Trials</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    
+    
+    
+    # 1) GENE FREQUENCY - FIXED TREEMAP (NO DUPLICATES, PROFESSIONAL)
+    st.markdown('<h3 class="section-header">Gene Frequency by Cancer Subtype</h3>', unsafe_allow_html=True)
+
+    if hasattr(st.session_state, 'df_gene_frequencies') and st.session_state.df_gene_frequencies is not None:
+        df_gene_freq = st.session_state.df_gene_frequencies
+        subtypes = sorted(df_gene_freq['CANCER_SUBTYPE_STANDARDIZED'].unique().tolist())
+        
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            selected_subtype = st.selectbox(
+                "Cancer Subtype",
+                options=subtypes,
+                key="exec_subtype",
+                label_visibility="collapsed"
+            )
+        
+        with col2:
+            top_n_genes_exec = st.slider(
+                "Top N",
+                min_value=5,
+                max_value=30,
+                value=10,
+                step=5,
+                key="exec_top_n",
+                label_visibility="collapsed"
+            )
+        
+        subtype_data = df_gene_freq[
+            df_gene_freq['CANCER_SUBTYPE_STANDARDIZED'] == selected_subtype
+        ].sort_values('gene_frequency_in_subtype_pct', ascending=False).head(top_n_genes_exec)
+        
+        if not subtype_data.empty:
+            # Professional color scale - lighter shades for better text visibility
+            fig_treemap = px.treemap(
+                subtype_data,
+                path=['gene'],
+                values='gene_frequency_in_subtype_pct',
+                title=f"<b>Top {top_n_genes_exec} Genes - {selected_subtype}</b>",
+                color='gene_frequency_in_subtype_pct',
+                color_continuous_scale=[
+                    [0, "#34B2E5"],      # Very light teal
+                    [0.25, "#035481"],   # Light blue
+                    [0.5, "#216D62"],    # Medium teal
+                    [0.75, "#00B050"],   # Light blue
+                    [1, "#F47421"]       # Axtria teal (darkest)
+                ],
+                height=450
+            )
+            fig_treemap.update_layout(
+                coloraxis_colorbar=dict(
+                    title="Gene Frequency (%)"
+                )
+            )
+            # Update with dark text that's always visible
+            fig_treemap.update_traces(
+                textinfo='label+value',
+                texttemplate='<b>%{label}</b><br>%{value:.1f}%',
+                textposition='middle center',
+                textfont={
+                    'size': 14,
+                    'color': '#2C3E50',  # Dark text for all blocks
+                    'family': 'Arial, sans-serif',
+                    'weight': 'bold'
+                },
+                marker={
+                    'line': {'color': '#FFFFFF', 'width': 3},
+                    'colorbar': {'thickness': 15, 'title': 'Frequency %'}
+                },
+                hovertemplate='<b>%{label}</b><br>Frequency: %{value:.1f}%<extra></extra>'
+            )
+            
+            fig_treemap.update_layout(
+                font={'family': 'Arial, sans-serif', 'size': 12, 'color': '#2C3E50'},
+                paper_bgcolor='white',
+                plot_bgcolor='white',
+                title={'text': f"<b>Top {top_n_genes_exec} Genes - {selected_subtype}</b>", 'font': {'size': 17, 'color': '#1F6F65'}},
+                margin={'t': 60, 'l': 20, 'r': 20, 'b': 20}
+            )
+            
+            st.plotly_chart(fig_treemap, use_container_width=True)
+        st.markdown("---")
+    
+    
+    # 2) OVERALL SURVIVAL - NO MEDIAN, DYNAMIC TABLE
+        # 2) OVERALL SURVIVAL - WITH SUBTYPE DISTRIBUTION %
+    st.markdown('<h3 class="section-header">Overall Survival Analysis</h3>', unsafe_allow_html=True)
+
+    if 'OS_MONTHS' in st.session_state.df_clean.columns:
+        df_os = st.session_state.df_clean[['CANCER_SUBTYPE_STANDARDIZED', 'OS_MONTHS', 'patientId']].copy()
+        df_os['OS_MONTHS'] = pd.to_numeric(df_os['OS_MONTHS'], errors='coerce')
+        df_os_valid = df_os.dropna(subset=['OS_MONTHS'])
+        
+        if not df_os_valid.empty:
+            # Calculate total patients analyzed
+            total_patients_analyzed = st.session_state.df_clean['patientId'].nunique()
+            
+            # Create summary by subtype
+            os_summary = df_os_valid.groupby('CANCER_SUBTYPE_STANDARDIZED').agg({
+                'patientId': 'nunique',
+                'OS_MONTHS': ['mean', 'median', 'std', 'min', 'max']
+            }).round(1)
+            
+            os_summary.columns = ['Patients with OS Data', 'Mean OS (months)', 'Median OS (months)', 
+                                  'Std Dev', 'Min OS', 'Max OS']
+            os_summary = os_summary.reset_index()
+            os_summary.columns = ['Cancer Subtype', 'Patients with OS Data', 'Mean OS (months)', 
+                                  'Median OS (months)', 'Std Dev', 'Min OS', 'Max OS']
+            
+            # Add subtype distribution column
+            subtype_total_patients = st.session_state.df_clean.groupby('CANCER_SUBTYPE_STANDARDIZED')['patientId'].nunique()
+            os_summary['Total Patients in Subtype'] = os_summary['Cancer Subtype'].map(subtype_total_patients)
+            
+            # Calculate % of total analyzed patients
+            os_summary['% of Analyzed Population'] = (
+                (os_summary['Total Patients in Subtype'] / total_patients_analyzed) * 100
+            ).round(2)
+            
+            # Reorder columns
+            os_summary = os_summary[[
+                'Cancer Subtype',
+                'Total Patients in Subtype',
+                '% of Analyzed Population',
+                'Patients with OS Data',
+                'Mean OS (months)',
+                'Median OS (months)',
+                'Std Dev',
+                'Min OS',
+                'Max OS'
+            ]].sort_values('Mean OS (months)', ascending=False)
+            
+            # Bar chart - Mean OS
+            fig_os = go.Figure()
+            fig_os.add_trace(go.Bar(
+                name='Mean OS',
+                y=os_summary['Cancer Subtype'],
+                x=os_summary['Mean OS (months)'],
+                orientation='h',
+                marker={'color': '#1F6F65'},
+                text=os_summary['Mean OS (months)'],
+                textposition='outside',
+                textfont={'size': 12, 'color': '#2C3E50', 'family': 'Arial'},
+                customdata=os_summary[['Patients with OS Data', '% of Analyzed Population']],
+                hovertemplate='<b>%{y}</b><br>' +
+                              'Mean OS: %{x:.1f} months<br>' +
+                              'Patients: %{customdata[0]}<br>' +
+                              'Population %: %{customdata[1]:.1f}%<extra></extra>'
+            ))
+            
+            fig_os.update_layout(
+                title={'text': '<b>Mean Overall Survival by Cancer Subtype</b>', 
+                       'font': {'size': 17, 'color': '#1F6F65'}},
+                xaxis={'title': {'text': 'Mean Overall Survival (months)', 
+                                 'font': {'size': 13, 'color': '#4A4A4A'}}, 
+                       'showgrid': True, 'gridcolor': '#E0E0E0'},
+                yaxis={'title': None, 'categoryorder': 'total ascending'},
+                showlegend=False,
+                font={'family': 'Arial, sans-serif', 'size': 11, 'color': '#2C3E50'},
+                paper_bgcolor='white',
+                plot_bgcolor='white',
+                height=max(400, len(os_summary) * 40),
+                margin={'t': 80, 'l': 200, 'r': 80, 'b': 60}
+            )
+            st.plotly_chart(fig_os, use_container_width=True)
+
+            # Summary info box
+            st.info(f"📊 **Analysis Summary:** {total_patients_analyzed:,} total patients analyzed across {len(os_summary)} cancer subtypes")
+            
+            # Collapsible detailed table with distribution
+            with st.expander("📋 View Detailed Overall Survival Data", expanded=False):
+                num_rows = len(os_summary)
+                table_height = min(600, max(150, num_rows * 35 + 38))
+                
+                st.dataframe(
+                    os_summary.style.format({
+                        'Total Patients in Subtype': '{:,}',
+                        '% of Analyzed Population': '{:.2f}%',
+                        'Patients with OS Data': '{:,}',
+                        'Mean OS (months)': '{:.1f}',
+                        'Median OS (months)': '{:.1f}',
+                        'Std Dev': '{:.1f}',
+                        'Min OS': '{:.1f}',
+                        'Max OS': '{:.1f}'
+                    }),
+                    use_container_width=True,
+                    hide_index=True,
+                    height=table_height
+                )
+                
+                # Download button
+                csv_os = os_summary.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Download OS Analysis with Distribution (CSV)",
+                    data=csv_os,
+                    file_name=f"os_analysis_distribution_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+        else:
+            st.info("No survival data available")
+    else:
+        st.info("OS_MONTHS column not found")
+
+    st.markdown("---")
+
+# 3) FDA SUNBURST - DRUG-BIOMARKER MAPPING
+    st.markdown('<h3 class="section-header">FDA Drug-Biomarker Mapping</h3>', unsafe_allow_html=True)
+    # Add radio toggle for global vs subtype-specific sunburst
+    view_mode = st.radio(
+        "View Mode",
+        options=["Global View", "Subtype-Specific"],
+        horizontal=True,
+        key="fda_sunburst_mode"
+    )
+
+    # Determine subtype if subtype-specific mode
+    selected_subtype_for_sunburst = None
+    if view_mode == "Subtype-Specific":
+        selected_subtype_for_sunburst = st.session_state.get("exec_subtype", None)
+
+    if st.session_state.drug_biomarker_map:
+    # 3) FDA SUNBURST - DRUG-BIOMARKER MAPPING
+        # st.markdown('<h3 class="section-header">FDA Drug-Biomarker Mapping</h3>', unsafe_allow_html=True)
+
+
+        if view_mode == "Subtype-Specific":
+
+            # Filter gene frequencies for selected subtype
+            df_gene_freq_sub = st.session_state.df_gene_frequencies[
+                st.session_state.df_gene_frequencies['CANCER_SUBTYPE_STANDARDIZED'] == selected_subtype_for_sunburst
+            ]
+
+            subtype_genes = set(df_gene_freq_sub['gene'].unique())
+
+            fda_sunburst_data = []
+            for drug, biomarkers in st.session_state.drug_biomarker_map.items():
+                for biomarker in set(biomarkers):
+                    if biomarker in subtype_genes:
+                        fda_sunburst_data.append({
+                            'Biomarker': biomarker,
+                            'Drug': drug,
+                            'Count': 1
+                        })
+
+        else:
+            # GLOBAL MODE
+            fda_sunburst_data = []
+            for drug, biomarkers in st.session_state.drug_biomarker_map.items():
+                for biomarker in set(biomarkers):
+                    fda_sunburst_data.append({
+                        'Biomarker': biomarker,
+                        'Drug': drug,
+                        'Count': 1
+                    })
+        # ------------------------------------------------
+
+        df_fda_sunburst = pd.DataFrame(fda_sunburst_data)
+
+        
+        if not df_fda_sunburst.empty:
+            fig_fda = px.sunburst(
+                df_fda_sunburst,
+                path=['Biomarker', 'Drug'],
+                values='Count',
+                title="<b>Biomarker → Drug Relationships</b>",
+                color_discrete_sequence=config.CHART_PALETTES['sunburst'],
+                height=550
+            )
+            fig_fda.update_traces(
+                textinfo='label',
+                textfont={'size': 13, 'family': 'Arial, sans-serif', 'color': '#2C3E50'},
+                marker={'line': {'color': 'white', 'width': 2}}
+            )
+            fig_fda.update_layout(
+                font={'family': 'Arial, sans-serif', 'size': 11, 'color': '#2C3E50'},
+                paper_bgcolor='white',
+                title={'text': '<b>Biomarker → Drug Relationships</b>', 'font': {'size': 17, 'color': "#000000"}},
+                margin={'t': 60, 'l': 20, 'r': 20, 'b': 20}
+            )
+            st.plotly_chart(fig_fda, use_container_width=True)
+    else:
+        st.info("No drug-biomarker mapping available")
+
+    st.markdown("---")
+    
+    # 4) TRIAL ANALYSIS - FIXED
+    st.markdown('<h3 class="section-header">Clinical Trials by Biomarker</h3>', unsafe_allow_html=True)
+
+    if st.session_state.df_clinical_trials is not None and not st.session_state.df_clinical_trials.empty:
+        df_trials = st.session_state.df_clinical_trials
+        
+        trial_view = st.radio(
+            "Metric",
+            options=['Trial Count', 'Phase Distribution'],
+            horizontal=True,
+            key="exec_trial_view",
+            label_visibility="collapsed"
+        )
+        
+        if trial_view == 'Trial Count':
+            trial_counts = df_trials['Biomarker'].value_counts().reset_index()
+            trial_counts.columns = ['Biomarker', 'Trial Count']
+            
+            fig_trials = px.bar(
+                trial_counts,
+                y='Biomarker',
+                x='Trial Count',
+                orientation='h',
+                color='Trial Count',
+                color_continuous_scale=config.CHART_PALETTES['cool_gradient'],
+                text='Trial Count',
+                height=max(500, len(trial_counts) * 18),
+                title="<b>Clinical Trial Volume by Biomarker</b>"
+            )
+            fig_trials.update_traces(
+                textposition='outside',
+                textfont={'size': 11, 'color': '#2C3E50'}
+            )
+            fig_trials.update_layout(
+                yaxis={'categoryorder': 'total ascending', 'title': None, 
+                        'tickfont': {'size': 10, 'color': '#4A4A4A'}},
+                xaxis={'title': {'text': 'Number of Trials', 'font': {'size': 13, 'color': '#4A4A4A'}}, 
+                        'showgrid': True, 'gridcolor': '#E0E0E0'},
+                showlegend=False,
+                font={'family': 'Arial, sans-serif', 'size': 10, 'color': '#2C3E50'},
+                paper_bgcolor='white',
+                plot_bgcolor='white',
+                title={'text': '<b>Clinical Trial Volume by Biomarker</b>', 'font': {'size': 17, 'color': '#1F6F65'}},
+                margin={'t': 60, 'l': 20, 'r': 60, 'b': 50}
+            )
+            st.plotly_chart(fig_trials, use_container_width=True)
+        
+        else:  # Phase Distribution
+            phase_data = df_trials.groupby(['Biomarker', 'Phase']).size().reset_index(name='Count')
+            
+            fig_phase = px.bar(
+                phase_data,
+                x='Biomarker',
+                y='Count',
+                color='Phase',
+                title="<b>Trial Phase Distribution by Biomarker</b>",
+                color_discrete_map=config.PHASE_COLORS,
+                height=500,
+                barmode='stack'
+            )
+            fig_phase.update_layout(
+                xaxis={'tickangle': -45, 'title': None, 'tickfont': {'size': 10, 'color': '#4A4A4A'}},
+                yaxis={'title': {'text': 'Number of Trials', 'font': {'size': 13, 'color': '#4A4A4A'}}, 
+                        'showgrid': True, 'gridcolor': '#E0E0E0'},
+                font={'family': 'Arial, sans-serif', 'size': 11, 'color': '#2C3E50'},
+                paper_bgcolor='white',
+                plot_bgcolor='white',
+                title={'text': '<b>Trial Phase Distribution by Biomarker</b>', 'font': {'size': 17, 'color': '#1F6F65'}},
+                legend={'title': None, 'orientation': 'h', 'yanchor': 'bottom', 'y': 1.02, 'xanchor': 'right', 'x': 1},
+                margin={'t': 80, 'l': 50, 'r': 20, 'b': 100}
+            )
+            st.plotly_chart(fig_phase, use_container_width=True)
+    else:
+        st.info("No clinical trials data available")
+
+    st.markdown("---")
+
+    
+# 5) SPONSOR INTELLIGENCE - WITH LABEL TOGGLE
+    st.markdown('<h3 class="section-header">Sponsor Intelligence Matrix</h3>', unsafe_allow_html=True)
+
+    if st.session_state.df_clinical_trials is not None and not st.session_state.df_clinical_trials.empty:
+        df_trials = st.session_state.df_clinical_trials
+        
+        if 'Lead Sponsor' in df_trials.columns and 'Biomarker' in df_trials.columns:
+            
+            sponsor_data = []
+            
+            for sponsor in df_trials['Lead Sponsor'].unique():
+                sponsor_trials = df_trials[df_trials['Lead Sponsor'] == sponsor]
+                phase_counts = sponsor_trials['Phase'].value_counts().to_dict()
+                biomarkers = sponsor_trials['Biomarker'].unique()
+                
+                sponsor_data.append({
+                    'Sponsor': sponsor,
+                    'Total Trials': len(sponsor_trials),
+                    'Unique Biomarkers': len(biomarkers),
+                    'Phase 1': phase_counts.get('PHASE1', 0),
+                    'Phase 2': phase_counts.get('PHASE2', 0),
+                    'Phase 3': phase_counts.get('PHASE3', 0),
+                    'Top Biomarkers': ', '.join(list(biomarkers)[:3])
+                })
+            
+            df_sponsor_matrix = pd.DataFrame(sponsor_data).sort_values('Total Trials', ascending=False)
+            
+            st.markdown(f"**All {len(df_sponsor_matrix)} Sponsors: Trial Volume × Biomarker Diversity × Phase Distribution**")
+            
+            # Filter option with error handling
+            min_trials_value = int(df_sponsor_matrix['Total Trials'].min())
+            max_trials_value = int(df_sponsor_matrix['Total Trials'].max())
+            
+            # Only show slider if there's a range
+            if max_trials_value > min_trials_value:
+                col1, col2 = st.columns([3, 1])
+                
+                with col1:
+                    min_trials_filter = st.slider(
+                        "Minimum Trials",
+                        min_value=min_trials_value,
+                        max_value=max_trials_value,
+                        value=min_trials_value,
+                        key="exec_sponsor_filter_exec_tab"
+                    )
+                
+                with col2:
+                    st.metric("Sponsors", len(df_sponsor_matrix[df_sponsor_matrix['Total Trials'] >= min_trials_filter]))
+                
+                # Apply filter
+                df_sponsor_filtered = df_sponsor_matrix[df_sponsor_matrix['Total Trials'] >= min_trials_filter].copy()
+            else:
+                # All sponsors have same trial count - no filter needed
+                st.info(f"ℹ️ All {len(df_sponsor_matrix)} sponsors have {max_trials_value} trial(s)")
+                df_sponsor_filtered = df_sponsor_matrix.copy()
+            
+            # Check if we have sponsors to display
+            if df_sponsor_filtered.empty:
+                st.warning("No sponsors match the filter criteria")
+            else:
+                # Add jitter to prevent overlap
+                np.random.seed(42)
+                jitter_amount = 0.2
+                df_sponsor_filtered['X_Jittered'] = df_sponsor_filtered['Total Trials'] + np.random.uniform(-jitter_amount, jitter_amount, len(df_sponsor_filtered))
+                df_sponsor_filtered['Y_Jittered'] = df_sponsor_filtered['Unique Biomarkers'] + np.random.uniform(-jitter_amount, jitter_amount, len(df_sponsor_filtered))
+                
+                # Create hover text
+                hover_text = []
+                for _, row in df_sponsor_filtered.iterrows():
+                    hover_text.append(
+                        f"<b>{row['Sponsor']}</b><br>" +
+                        f"Total Trials: {row['Total Trials']}<br>" +
+                        f"Unique Biomarkers: {row['Unique Biomarkers']}<br>" +
+                        f"Phase 1: {row['Phase 1']}<br>" +
+                        f"Phase 2: {row['Phase 2']}<br>" +
+                        f"Phase 3: {row['Phase 3']}<br>" +
+                        f"Top Biomarkers: {row['Top Biomarkers']}"
+                    )
+                
+                fig_bubble = go.Figure()
+                
+                fig_bubble.add_trace(go.Scatter(
+                    x=df_sponsor_filtered['X_Jittered'],
+                    y=df_sponsor_filtered['Y_Jittered'],
+                    mode='markers',
+                    marker={
+                        'size': df_sponsor_filtered['Total Trials'] * 3.5,
+                        'sizemin': 8,
+                        'color': df_sponsor_filtered['Total Trials'],
+                        'colorscale': [
+                            [0, "#756E63"],
+                            [0.33, "#BEBBAE"],
+                            [0.66, "#E7B342"],
+                            [1, "#F08E17"]
+                        ],
+                        'opacity': 0.7,
+                        'line': {'color': 'white', 'width': 2},
+                        'colorbar': {
+                            'title': 'Total<br>Trials',
+                            'thickness': 15
+                        }
+                    },
+                    text=df_sponsor_filtered['Sponsor'],
+                    hovertext=hover_text,
+                    hovertemplate='%{hovertext}<extra></extra>',
+                    showlegend=False
+                ))
+                
+                fig_bubble.update_layout(
+                    title={'text': f'<b>Sponsor Portfolio Analysis ({len(df_sponsor_filtered)} Sponsors)</b>', 
+                        'font': {'size': 17, 'color': '#1F6F65'}},
+                    xaxis={
+                        'title': {'text': 'Total Clinical Trials', 'font': {'size': 13, 'color': '#4A4A4A'}}, 
+                        'showgrid': True,
+                        'gridcolor': '#E0E0E0'
+                    },
+                    yaxis={
+                        'title': {'text': 'Unique Biomarkers', 'font': {'size': 13, 'color': '#4A4A4A'}}, 
+                        'showgrid': True,
+                        'gridcolor': '#E0E0E0'
+                    },
+                    font={'family': 'Arial, sans-serif', 'size': 11, 'color': '#2C3E50'},
+                    paper_bgcolor='white',
+                    plot_bgcolor='white',
+                    height=700,
+                    margin={'t': 80, 'l': 60, 'r': 20, 'b': 60},
+                    hovermode='closest'
+                )
+                
+                st.plotly_chart(fig_bubble, use_container_width=True)
+                
+                # Info message
+                st.info("💡 **Tip:** Small random spacing added to prevent overlapping sponsors. Hover over bubbles to see exact values.")
+                
+                # Auto-adjusting table
+                with st.expander("📋 View Detailed Sponsor Data", expanded=False):
+                    df_sponsor_display = df_sponsor_filtered[[
+                        'Sponsor', 'Total Trials', 'Unique Biomarkers', 
+                        'Phase 1', 'Phase 2', 'Phase 3', 'Top Biomarkers'
+                    ]].copy()
+                    
+                    num_rows = len(df_sponsor_display)
+                    table_height = (num_rows * 35) + 38
+                    
+                    st.dataframe(
+                        df_sponsor_display,
+                        use_container_width=True,
+                        hide_index=True,
+                        height=table_height
+                    )
+        else:
+            st.info("Sponsor data not available")
+    else:
+        st.info("No clinical trials data available")
+    
+# ============================================================================
+# FDA TAB - DRUG INFORMATION
+# ============================================================================
+
+
+with tab_fda:
+    st.markdown('<h2 class="section-header">FDA Drug Database</h2>', unsafe_allow_html=True)
+    st.markdown("Comprehensive FDA drug information including approved indications and line of therapy")
+    
+    # Create sub-tabs within FDA tab
+    fda_subtab1, fda_subtab2 = st.tabs([
+        "🎯 Matched Drugs (from Biomarkers)",
+        "🌐 All Drugs by Indication"
+    ])
+    
+# ============================================
+# SUBTAB 1: MATCHED DRUGS (Your existing code)
+
+
+with fda_subtab1:
+    st.markdown("### 🎯 Biomarker-Matched Drugs")
+    st.markdown(f"Showing FDA data for drugs matched to your selected biomarkers")
+    
+    if st.session_state.processing_done and st.session_state.drug_list:
+
+        
+        st.markdown(f"**{len(st.session_state.drug_list)} drugs matched** from biomarker analysis")
+        
+        # Drug selector
+        selected_drug = st.selectbox(
+            "Select Drug",
+            options=st.session_state.drug_list,
+            key="fda_drug_selector"
+        )
+        
+        if selected_drug:
+
+            # Lazy load: fetch only if not already loaded
+            if selected_drug not in st.session_state.df_fda_comprehensive:
+                with st.spinner("Fetching FDA data..."):
+                    drug_data = fetch_fda_comprehensive_per_drug_fixed(selected_drug)
+                    st.session_state.df_fda_comprehensive[selected_drug] = drug_data
+            else:
+                drug_data = st.session_state.df_fda_comprehensive[selected_drug]
+
+            
+            st.markdown(f"### 💊 {selected_drug}")
+            
+            # AI-powered indication and LoT extraction
+            with st.spinner("Extracting indications and line of therapy information..."):
+                indication_lot_info = extract_indication_and_lot(selected_drug, drug_data)
+            
+            st.markdown("---")
+            st.markdown("#### 🎯 Approved Indications & Line of Therapy")
+            
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                st.markdown("**Approved Indications:**")
+                if indication_lot_info['indications']:
+                    for idx, indication in enumerate(indication_lot_info['indications'], 1):
+                        st.markdown(f"{idx}. {indication}")
+                else:
+                    st.info("No specific indications extracted from FDA data")
+            
+            with col2:
+                st.markdown("**Line of Therapy:**")
+                if indication_lot_info['line_of_therapy']:
+                    for lot in indication_lot_info['line_of_therapy']:
+                        st.markdown(f"• {lot}")
+                else:
+                    st.info("LoT information not available")
+            
+            st.markdown(f"""
+            <div style="background: linear-gradient(135deg, #E8F5F3 0%, #D5EBE8 100%); 
+                        padding: 1.5rem; 
+                        border-radius: 8px; 
+                        border-left: 4px solid #1F6F65;
+                        margin: 1rem 0;">
+                <h4 style="color: #1F6F65; margin-top: 0;">📋 Drug Use Summary</h4>
+                <p style="color: #2C3E50; margin-bottom: 0.5rem;">
+                    <strong>Primary Use:</strong> {indication_lot_info.get('primary_use', 'Not specified')}
+                </p>
+                <p style="color: #2C3E50; margin-bottom: 0.5rem;">
+                    <strong>Cancer Types:</strong> {', '.join(indication_lot_info.get('cancer_types', ['Not specified']))}
+                </p>
+                <p style="color: #2C3E50; margin: 0;">
+                    <strong>Positioning:</strong> {indication_lot_info.get('positioning', 'Information not available')}
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            st.markdown("---")
+            
+            # Display drug profile
+            if drug_data['profile_df'] is not None and not drug_data['profile_df'].empty:
+                st.markdown("#### 📄 Drug Profile")
+                
+                profile_df = drug_data['profile_df']
+                
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    if 'application_number' in profile_df.columns:
+                        app_num = profile_df['application_number'].iloc[0] if len(profile_df) > 0 else "N/A"
+                        st.metric("Application Number", app_num)
+                
+                with col2:
+                    if 'Approval Date' in profile_df.columns:
+                        approval_date = profile_df['Approval Date'].iloc[0] if len(profile_df) > 0 else "N/A"
+                        st.metric("Approval Date", approval_date)
+                
+                with col3:
+                    if 'brand_name' in profile_df.columns:
+                        brand_name = profile_df['brand_name'].iloc[0] if len(profile_df) > 0 else "N/A"
+                        st.metric("Brand Name", brand_name)
+                
+                with st.expander("📋 View Complete Drug Profile", expanded=False):
+                    profile_height = min(400, max(100, len(profile_df) * 35 + 38))
+                    st.dataframe(profile_df, use_container_width=True, hide_index=True, height=profile_height)
+            
+            st.markdown("---")
+            
+            # Display submissions
+            if drug_data['submissions_df'] is not None and not drug_data['submissions_df'].empty:
+                st.markdown("#### 📊 Submission History")
+                
+                submissions_df = drug_data['submissions_df']
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.metric("Total Submissions", len(submissions_df))
+                
+                with col2:
+                    if 'submission_type' in submissions_df.columns:
+                        orig_count = len(submissions_df[submissions_df['submission_type'] == 'ORIG'])
+                        st.metric("Original Submissions", orig_count)
+                
+                with st.expander("📋 View Submission Details", expanded=True):
+                    submissions_height = min(400, max(150, len(submissions_df) * 35 + 38))
+                    st.dataframe(submissions_df, use_container_width=True, hide_index=True, height=submissions_height)
+            
+            st.markdown("---")
+            
+            # Clinical summary
+            st.markdown("#### 🔬 Clinical Studies Summary")
+            
+            clinical_summary = drug_data.get('clinical_summary', 'No clinical summary available')
+            
+            st.markdown(f"""
+            <div style="background: #F8F9FA; padding: 1.5rem; border-radius: 8px; border-left: 4px solid #1F6F65;">
+                <p style="color: #4A4A4A; line-height: 1.6; margin: 0;">{clinical_summary}</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            st.markdown("---")
+            
+            # Export
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if drug_data['profile_df'] is not None:
+                    csv_drug = drug_data['profile_df'].to_csv(index=False).encode('utf-8')
+                    st.download_button(
+                        label=f"📥 Download {selected_drug} Profile (CSV)",
+                        data=csv_drug,
+                        file_name=f"fda_{selected_drug}_profile_2025-11-06_01-38-52.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+            
+            with col2:
+                indication_export = f"""FDA Drug Information: {selected_drug}
+# Generated: 2025-11-06 01:38:52 UTC
+# User: pulkit-079
+
+APPROVED INDICATIONS:
+{chr(10).join(['• ' + ind for ind in indication_lot_info['indications']]) if indication_lot_info['indications'] else 'Not available'}
+
+LINE OF THERAPY:
+{chr(10).join(['• ' + lot for lot in indication_lot_info['line_of_therapy']]) if indication_lot_info['line_of_therapy'] else 'Not available'}
+
+PRIMARY USE:
+{indication_lot_info.get('primary_use', 'Not specified')}
+
+CANCER TYPES:
+{', '.join(indication_lot_info.get('cancer_types', ['Not specified']))}
+
+POSITIONING:
+{indication_lot_info.get('positioning', 'Information not available')}
+"""
+                st.download_button(
+                    label=f"📄 Download Indication & LoT Info (TXT)",
+                    data=indication_export,
+                    file_name=f"fda_{selected_drug}_indication_lot_2025-11-06_01-38-52.txt",
+                    mime="text/plain",
+                    use_container_width=True
+                )
+        else:
+            st.warning(f"No FDA data available for {selected_drug}")
+    
+    else:
+        st.info("No FDA drug data available. Run the pipeline to fetch drug information.")
+    
+    # Footer
+    st.markdown("---")
+    st.markdown(f"""
+    <div style="text-align: center; font-size: 0.75rem; color: #888;">
+        <p><strong>Data Source:</strong> FDA drugs@FDA API | <strong>User:</strong> pulkit-079 | <strong>Timestamp:</strong> 2025-11-06 01:38:52 UTC</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+# ============================================================================
+# FDA SUBTAB 2 - TREATMENT DATABASE WITH FUZZY MATCHING
+# Updated: 2025-11-06 01:18:06 UTC
+# User: pulkit-079
+# ============================================================================
+
+with fda_subtab2:
+    st.markdown("### 💊 Treatment Database - Fuzzy Matching")
+    st.markdown(f"Match treatments for **{st.session_state.condition_keyword}** cancer from local database")
+    
+    # Load treatment database (cached)
+    if not hasattr(st.session_state, 'treatment_database'):
+        with st.spinner("Loading treatment database..."):
+            df_treatments = load_treatment_database()
+            if df_treatments is not None:
+                st.session_state.treatment_database = df_treatments
+                st.session_state.treatment_db_loaded = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
+    if not hasattr(st.session_state, 'treatment_database') or st.session_state.treatment_database is None:
+        st.error("⚠️ Treatment database not available")
+        st.info("Please ensure drugs.xlsx exists in the static/ folder with sheet name 'drugs'")
+        st.stop()
+    
+    df_treatments = st.session_state.treatment_database
+    
+    # Show database info
+    st.markdown(f"""
+    <div style="background: #E8F5F3; padding: 1rem; border-radius: 6px; border-left: 4px solid #1F6F65; margin-bottom: 1rem;">
+        <p style="margin: 0; color: #2C3E50;">
+            <strong>Database:</strong> drugs.xlsx (sheet: drugs)<br>
+            <strong>Total Records:</strong> {len(df_treatments):,}<br>
+            <strong>Loaded:</strong> {st.session_state.treatment_db_loaded}<br>
+            <strong>Cancer Type:</strong> {st.session_state.condition_keyword}
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    # Fuzzy matching controls
+    col1, col2, col3 = st.columns([2, 1, 1])
+    
+    with col1:
+        st.info("🔍 Using fuzzy matching on Histology and Primary Site columns")
+    
+    with col2:
+        match_threshold = st.slider(
+            "Match Threshold",
+            min_value=50,
+            max_value=100,
+            value=70,
+            step=5,
+            help="Lower = more results, Higher = more precise",
+            key="fuzzy_threshold"
+        )
+    
+    with col3:
+        search_button = st.button(
+            "🔍 Search Treatments",
+            use_container_width=True,
+            type="primary",
+            key="search_treatments_btn"
+        )
+    
+    # Perform fuzzy matching
+    should_search = False
+    
+    if search_button:
+        should_search = True
+    
+    # Check cache
+    cache_key = f"matched_treatments_{st.session_state.condition_keyword}_{match_threshold}"
+    if hasattr(st.session_state, 'matched_treatments_cache_key'):
+        if st.session_state.matched_treatments_cache_key != cache_key:
+            should_search = True
+    
+    if should_search:
+        with st.spinner(f"Fuzzy matching treatments for {st.session_state.condition_keyword}..."):
+            matched_df = fuzzy_match_treatments(
+                st.session_state.condition_keyword,
+                df_treatments,
+                threshold=match_threshold
+            )
+            
+            if matched_df is not None:
+                st.session_state.matched_treatments = matched_df
+                st.session_state.matched_treatments_cache_key = cache_key
+                st.session_state.matched_treatments_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Display matched treatments
+    if hasattr(st.session_state, 'matched_treatments') and st.session_state.matched_treatments is not None:
+        
+        matched_df = st.session_state.matched_treatments
+        
+        # Show cache info
+        if hasattr(st.session_state, 'matched_treatments_timestamp'):
+            st.caption(f"ℹ️ Results cached | Last matched: {st.session_state.matched_treatments_timestamp}")
+        
+        st.markdown("---")
+        
+        # Summary metrics
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.markdown(f"""
+            <div class="metric-card">
+                <h3>{len(matched_df):,}</h3>
+                <p>Matched Treatments</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col2:
+            unique_categories = matched_df['Category'].nunique()
+            st.markdown(f"""
+            <div class="metric-card orange">
+                <h3>{unique_categories}</h3>
+                <p>Categories</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col3:
+            avg_match = matched_df['Match_Score'].mean()
+            st.markdown(f"""
+            <div class="metric-card blue">
+                <h3>{avg_match:.1f}%</h3>
+                <p>Avg Match Score</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col4:
+            high_match = len(matched_df[matched_df['Match_Score'] >= 85])
+            st.markdown(f"""
+            <div class="metric-card yellow">
+                <h3>{high_match}</h3>
+                <p>High Confidence</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.markdown("---")
+        
+        # Filters
+        st.markdown("### 🎛️ Filter Options")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            category_filter = st.multiselect(
+                "Category",
+                options=sorted(matched_df['Category'].dropna().unique()),
+                key="treatment_category_filter"
+            )
+        
+        with col2:
+            subcategory_filter = st.multiselect(
+                "Sub-category",
+                options=sorted(matched_df['Sub-category'].dropna().unique()),
+                key="treatment_subcategory_filter"
+            )
+        
+        with col3:
+            min_score = st.slider(
+                "Minimum Match Score",
+                min_value=int(matched_df['Match_Score'].min()),
+                max_value=100,
+                value=int(matched_df['Match_Score'].min()),
+                key="min_match_score"
+            )
+        
+        # Apply filters
+        df_filtered = matched_df.copy()
+        
+        if category_filter:
+            df_filtered = df_filtered[df_filtered['Category'].isin(category_filter)]
+        
+        if subcategory_filter:
+            df_filtered = df_filtered[df_filtered['Sub-category'].isin(subcategory_filter)]
+        
+        df_filtered = df_filtered[df_filtered['Match_Score'] >= min_score]
+        
+        st.info(f"📊 Showing **{len(df_filtered):,}** of **{len(matched_df):,}** treatments")
+        
+        st.markdown("---")
+        
+        # Main treatment table - DYNAMIC HEIGHT
+        st.markdown("### 📋 Matched Treatments")
+        
+        display_cols = ['Name', 'Category', 'Sub-category', 'Histology', 'Primary Site', 'Match_Score', 'Remarks']
+        df_display = df_filtered[display_cols].copy()
+        
+        # Calculate dynamic height
+        table_height = min(600, max(200, len(df_display) * 35 + 38))
+        
+        st.dataframe(
+            df_display,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Name": st.column_config.TextColumn("Drug Name", width="medium"),
+                "Category": st.column_config.TextColumn("Category", width="small"),
+                "Sub-category": st.column_config.TextColumn("Sub-category", width="small"),
+                "Histology": st.column_config.TextColumn("Histology", width="medium"),
+                "Primary Site": st.column_config.TextColumn("Primary Site", width="small"),
+                "Match_Score": st.column_config.ProgressColumn(
+                    "Match Score",
+                    help="Fuzzy match confidence score",
+                    format="%d%%",
+                    min_value=0,
+                    max_value=100,
+                    width="small"
+                ),
+                "Remarks": st.column_config.TextColumn("Remarks", width="large")
+            },
+            height=table_height  # DYNAMIC HEIGHT
+        )
+        
+        st.markdown("---")
+        
+        # Drug Details Lookup from FDA - CLEANER LAYOUT
+        st.markdown("### 🔍 FDA Drug Details Lookup")
+        
+        # Create dropdown with unique drug names
+        drug_names = sorted(df_filtered['Name'].unique().tolist())
+        
+        selected_drug = st.selectbox(
+            "Select Drug (Generic Name) to view FDA details",
+            options=[''] + drug_names,
+            key="selected_drug_for_fda",
+            help="Select a drug to fetch comprehensive FDA information"
+        )
+        
+        if selected_drug:
+            # Auto-fetch on selection
+            cache_key_fda = f"fda_details_{selected_drug.lower().strip()}"
+            
+            if cache_key_fda not in st.session_state:
+                with st.spinner(f"Fetching FDA data for {selected_drug}..."):
+                    fda_details = fetch_drug_details_from_fda(selected_drug)
+                    st.session_state[cache_key_fda] = fda_details
+            
+            fda_data = st.session_state[cache_key_fda]
+            
+            if fda_data['found']:
+                st.markdown("---")
+                
+                # CLEANER FDA DETAILS LAYOUT
+                st.markdown(f"#### 💊 FDA Details: {selected_drug}")
+                
+                # Two-column layout
+                col1, col2 = st.columns([1, 1])
+                
+                with col1:
+                    st.markdown(f"""
+                    <div style="background: #F8F9FA; padding: 1.5rem; border-radius: 8px; border: 1px solid #E0E0E0;">
+                        <h5 style="color: #1F6F65; margin-top: 0;">📋 Basic Information</h5>
+                        <p style="margin: 0.5rem 0;"><strong>Brand Names:</strong><br>{', '.join(fda_data['brand_names']) if fda_data['brand_names'] else 'N/A'}</p>
+                        <p style="margin: 0.5rem 0;"><strong>Generic Name:</strong><br>{fda_data['generic_name']}</p>
+                        <p style="margin: 0.5rem 0;"><strong>Application #:</strong><br>{fda_data['application_number']}</p>
+                        <p style="margin: 0;"><strong>Approval Date:</strong><br>{fda_data['approval_date']}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                with col2:
+                    st.markdown(f"""
+                    <div style="background: #F8F9FA; padding: 1.5rem; border-radius: 8px; border: 1px solid #E0E0E0;">
+                        <h5 style="color: #1F6F65; margin-top: 0;">🏢 Product Details</h5>
+                        <p style="margin: 0.5rem 0;"><strong>Manufacturers:</strong><br>{', '.join(fda_data['manufacturers']) if fda_data['manufacturers'] else 'N/A'}</p>
+                        <p style="margin: 0.5rem 0;"><strong>Dosage Forms:</strong><br>{', '.join(fda_data['dosage_forms']) if fda_data['dosage_forms'] else 'N/A'}</p>
+                        <p style="margin: 0;"><strong>Routes:</strong><br>{', '.join(fda_data['routes']) if fda_data['routes'] else 'N/A'}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                st.markdown("")
+                
+                # FIXED FDA LINK
+                if fda_data['fda_url']:
+                    st.markdown(f"""
+                    <a href="{fda_data['fda_url']}" target="_blank" style="
+                        display: inline-block;
+                        background: linear-gradient(135deg, #1F6F65 0%, #005B82 100%);
+                        color: white;
+                        padding: 0.75rem 1.5rem;
+                        border-radius: 6px;
+                        text-decoration: none;
+                        font-weight: 600;
+                        transition: transform 0.2s;
+                    ">
+                        🔗 View Full Details on drugs@FDA
+                    </a>
+                    """, unsafe_allow_html=True)
+                
+                st.caption(f"Data cached from FDA API | Fetched: {fda_data['fetch_timestamp']}")
+            
+            else:
+                st.warning(f"⚠️ {fda_data.get('message', 'Drug not found in FDA database')}")
+        
+        st.markdown("---")
+        
+        # Export options
+        st.markdown("### 📥 Export Data")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        export_cols = ['Name', 'Histology', 'Primary Site', 'Remarks', 'Category', 'Sub-category', 'Match_Score']
+        
+        with col1:
+            csv_filtered = df_filtered[export_cols].to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📊 Download Filtered (CSV)",
+                data=csv_filtered,
+                file_name=f"treatments_filtered_{st.session_state.condition_keyword}_2025-11-06_01-18-06.csv",
+                mime="text/csv",
+                use_container_width=True,
+                key="download_treatments_filtered"
+            )
+        
+        with col2:
+            csv_all = matched_df[export_cols].to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📄 Download All Matches (CSV)",
+                data=csv_all,
+                file_name=f"treatments_all_{st.session_state.condition_keyword}_2025-11-06_01-18-06.csv",
+                mime="text/csv",
+                use_container_width=True,
+                key="download_treatments_all"
+            )
+        
+        with col3:
+            # Clear cache button
+            if st.button("🔄 Clear Cache & Refresh", use_container_width=True):
+                # Clear treatment cache
+                for key in list(st.session_state.keys()):
+                    if 'matched_treatments' in key or 'fda_details' in key:
+                        del st.session_state[key]
+                st.rerun()
+    
+    else:
+        st.info("👆 Click **'Search Treatments'** to perform fuzzy matching on the database")
+    
+    # Footer
+    st.markdown("---")
+    st.markdown(f"""
+    <div style="text-align: center; font-size: 0.75rem; color: #888;">
+        <p><strong>Data Source:</strong> drugs.xlsx (local database) + drugs@FDA API | <strong>User:</strong> pulkit-079 | <strong>Timestamp:</strong> 2025-11-06 01:18:06 UTC</p>
+    </div>
+    """, unsafe_allow_html=True)    
+
+
+      
+# ============================================================================
+# GENE ANALYSIS TAB - COMPREHENSIVE DATA TABLE
+# ============================================================================
+
+with tab_gene:
+    st.markdown('<h2 class="section-header">Gene Analysis</h2>', unsafe_allow_html=True)
+    st.markdown("Comprehensive gene frequency data across cancer subtypes")
+    
+    if hasattr(st.session_state, 'df_gene_frequencies') and st.session_state.df_gene_frequencies is not None:
+        df_gene_freq = st.session_state.df_gene_frequencies
+        
+        # Filter controls
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            subtype_filter = st.multiselect(
+                "Filter by Subtype",
+                options=sorted(df_gene_freq['CANCER_SUBTYPE_STANDARDIZED'].unique().tolist()),
+                default=None
+            )
+        
+        with col2:
+            gene_filter = st.multiselect(
+                "Filter by Gene",
+                options=sorted(df_gene_freq['gene'].unique().tolist()),
+                default=None
+            )
+        
+        with col3:
+            min_freq = st.slider(
+                "Minimum Frequency (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=0.0,
+                step=1.0
+            )
+        
+        # Apply filters
+        df_filtered = df_gene_freq.copy()
+        
+        if subtype_filter:
+            df_filtered = df_filtered[df_filtered['CANCER_SUBTYPE_STANDARDIZED'].isin(subtype_filter)]
+        
+        if gene_filter:
+            df_filtered = df_filtered[df_filtered['gene'].isin(gene_filter)]
+        
+        if min_freq > 0:
+            df_filtered = df_filtered[df_filtered['gene_frequency_in_subtype_pct'] >= min_freq]
+        
+        # Sort and display
+        df_display = df_filtered[[
+            'CANCER_SUBTYPE_STANDARDIZED',
+            'gene',
+            'unique_patients_with_gene',
+            'total_patients_in_subtype',
+            'gene_frequency_in_subtype_pct',
+            'unique_patients_overall',
+            'total_patients_overall',
+            'gene_frequency_overall_pct'
+        ]].sort_values('gene_frequency_in_subtype_pct', ascending=False).reset_index(drop=True)
+        
+        df_display.columns = [
+            'Cancer Subtype',
+            'Gene',
+            'Patients with Gene (Subtype)',
+            'Total Patients (Subtype)',
+            'Frequency in Subtype (%)',
+            'Patients with Gene (Overall)',
+            'Total Patients (Overall)',
+            'Frequency Overall (%)'
+        ]
+        
+        st.markdown(f"**{len(df_display):,} records** | **{df_display['Gene'].nunique()} unique genes** | **{df_display['Cancer Subtype'].nunique()} subtypes**")
+        
+        st.dataframe(
+            df_display,
+            use_container_width=True,
+            hide_index=True,
+            height=600
+        )
+        
+        # Download
+        csv_gene = df_display.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Download Gene Analysis (CSV)",
+            data=csv_gene,
+            file_name=f"gene_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+    else:
+        st.info("No gene frequency data available")
+# ============================================================================
+# CLINICAL TRIALS TAB - HYPERLINKED NCT IDs
+# ============================================================================
+
+
+# ============================================================================
+# CLINICAL TRIALS TAB - COMPLETE FINAL VERSION
+# ============================================================================
+
+with tab_trials:
+    st.markdown('<h2 class="section-header">Clinical Trials</h2>', unsafe_allow_html=True)
+    st.markdown("Industry-sponsored clinical trials for selected biomarkers")
+    
+    if st.session_state.df_clinical_trials is not None and not st.session_state.df_clinical_trials.empty:
+        
+        df_trials = st.session_state.df_clinical_trials
+        
+        st.markdown(f"**{len(df_trials):,} active clinical trials** found for selected biomarkers")
+        
+        # Summary metrics
+        col1, col2, col3, col4, col5 = st.columns(5)
+        
+        with col1:
+            st.markdown(f"""
+            <div class="metric-card">
+                <h3>{len(df_trials):,}</h3>
+                <p>Total Trials</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col2:
+            phase3_count = len(df_trials[df_trials['Phase'].str.contains('PHASE3', na=False)])
+            st.markdown(f"""
+            <div class="metric-card orange">
+                <h3>{phase3_count}</h3>
+                <p>Phase 3 Trials</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col3:
+            unique_biomarkers = df_trials['Biomarker'].nunique()
+            st.markdown(f"""
+            <div class="metric-card blue">
+                <h3>{unique_biomarkers}</h3>
+                <p>Biomarkers</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col4:
+            recruiting = len(df_trials[df_trials['Status'] == 'RECRUITING'])
+            st.markdown(f"""
+            <div class="metric-card yellow">
+                <h3>{recruiting}</h3>
+                <p>Recruiting</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col5:
+            unique_sponsors = df_trials['Lead Sponsor'].nunique()
+            st.markdown(f"""
+            <div class="metric-card">
+                <h3>{unique_sponsors}</h3>
+                <p>Sponsors</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.markdown("---")
+        
+        # Filters
+        st.markdown("### 🎛️ Filter Options")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            phase_options = sorted(df_trials['Phase'].dropna().unique())
+            phase_filter = st.multiselect(
+                "Phase",
+                options=phase_options,
+                key="trials_phase_filter"
+            )
+        
+        with col2:
+            status_options = sorted(df_trials['Status'].dropna().unique())
+            status_filter = st.multiselect(
+                "Status",
+                options=status_options,
+                key="trials_status_filter"
+            )
+        
+        with col3:
+            biomarker_options = sorted(df_trials['Biomarker'].dropna().unique())
+            biomarker_filter = st.multiselect(
+                "Biomarker",
+                options=biomarker_options,
+                key="trials_biomarker_filter"
+            )
+        
+        with col4:
+            sponsor_options = sorted(df_trials['Lead Sponsor'].dropna().unique())
+            sponsor_filter = st.multiselect(
+                "Lead Sponsor",
+                options=sponsor_options,
+                key="trials_sponsor_filter"
+            )
+        
+        # Apply filters
+        df_trials_filtered = df_trials.copy()
+        
+        if phase_filter:
+            df_trials_filtered = df_trials_filtered[df_trials_filtered['Phase'].isin(phase_filter)]
+        
+        if status_filter:
+            df_trials_filtered = df_trials_filtered[df_trials_filtered['Status'].isin(status_filter)]
+        
+        if biomarker_filter:
+            df_trials_filtered = df_trials_filtered[df_trials_filtered['Biomarker'].isin(biomarker_filter)]
+        
+        if sponsor_filter:
+            df_trials_filtered = df_trials_filtered[df_trials_filtered['Lead Sponsor'].isin(sponsor_filter)]
+        
+        st.info(f"📊 Showing **{len(df_trials_filtered):,}** of **{len(df_trials):,}** trials")
+        
+        st.markdown("---")
+        
+        # Main trials table with FIXED hyperlinks
+        st.markdown("### 📋 Clinical Trials")
+        
+        # Ensure NCT URL column is properly formatted
+        if 'NCT URL' not in df_trials_filtered.columns and 'NCT ID' in df_trials_filtered.columns:
+            df_trials_filtered['NCT URL'] = df_trials_filtered['NCT ID'].apply(
+                lambda x: f"https://clinicaltrials.gov/study/{str(x).strip()}"
+            )
+        
+        # Display columns
+        display_cols = ['NCT ID', 'Title', 'Biomarker', 'Phase', 'Status', 'Lead Sponsor', 
+                        'Start Date', 'Completion Date', 'NCT URL']
+        
+        df_display = df_trials_filtered[display_cols].copy()
+        
+        st.dataframe(
+            df_display,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "NCT ID": st.column_config.TextColumn(
+                    "NCT ID",
+                    width="small",
+                    help="ClinicalTrials.gov identifier"
+                ),
+                "Title": st.column_config.TextColumn(
+                    "Trial Title",
+                    width="large",
+                    help="Official trial title"
+                ),
+                "Biomarker": st.column_config.TextColumn(
+                    "Biomarker",
+                    width="small",
+                    help="Associated biomarker/gene"
+                ),
+                "Phase": st.column_config.TextColumn(
+                    "Phase",
+                    width="small",
+                    help="Clinical trial phase"
+                ),
+                "Status": st.column_config.TextColumn(
+                    "Status",
+                    width="small",
+                    help="Current trial status"
+                ),
+                "Lead Sponsor": st.column_config.TextColumn(
+                    "Lead Sponsor",
+                    width="medium",
+                    help="Primary sponsor organization"
+                ),
+                "Start Date": st.column_config.TextColumn(
+                    "Start Date",
+                    width="small",
+                    help="Trial start date"
+                ),
+                "Completion Date": st.column_config.TextColumn(
+                    "Completion Date",
+                    width="small",
+                    help="Expected completion date"
+                ),
+                "NCT URL": st.column_config.LinkColumn(
+                    "ClinicalTrials.gov",
+                    help="View full trial details",
+                    display_text="🔗 View",
+                    width="small"
+                )
+            },
+            height=600
+        )
+        
+        st.markdown("---")
+        
+        # Visualizations
+        st.markdown("### 📊 Trial Distribution Analysis")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Phase distribution
+            phase_data = []
+            for phase_str in df_trials_filtered['Phase'].dropna():
+                phases = [p.strip() for p in str(phase_str).split(',')]
+                phase_data.extend(phases)
+            
+            if phase_data:
+                phase_counts = pd.Series(phase_data).value_counts().reset_index()
+                phase_counts.columns = ['Phase', 'Count']
+                
+                # Map to config colors
+                phase_counts['Color'] = phase_counts['Phase'].map(
+                    lambda x: config.PHASE_COLORS.get(x, '#CCCCCC')
+                )
+                
+                fig_phase = px.bar(
+                    phase_counts,
+                    x='Count',
+                    y='Phase',
+                    orientation='h',
+                    title='<b>Trials by Phase</b>',
+                    color='Phase',
+                    color_discrete_map=config.PHASE_COLORS,
+                    text='Count'
+                )
+                fig_phase.update_traces(textposition='outside')
+                fig_phase.update_layout(
+                    yaxis={'categoryorder': 'total ascending'},
+                    height=400,
+                    showlegend=False,
+                    title={'font': {'size': 15, 'color': '#1F6F65'}},
+                    font={'family': 'Arial, sans-serif', 'size': 11, 'color': '#2C3E50'},
+                    paper_bgcolor='white',
+                    plot_bgcolor='white'
+                )
+                st.plotly_chart(fig_phase, use_container_width=True)
+            else:
+                st.info("No phase data available")
+        
+        with col2:
+            # Status distribution
+            status_counts = df_trials_filtered['Status'].value_counts().reset_index()
+            status_counts.columns = ['Status', 'Count']
+            
+            fig_status = px.pie(
+                status_counts,
+                values='Count',
+                names='Status',
+                title='<b>Trials by Status</b>',
+                hole=0.4,
+                color_discrete_sequence=px.colors.qualitative.Set3
+            )
+            fig_status.update_traces(
+                textposition='inside',
+                textinfo='percent+label',
+                textfont={'size': 10}
+            )
+            fig_status.update_layout(
+                height=400,
+                title={'font': {'size': 15, 'color': '#1F6F65'}},
+                font={'family': 'Arial, sans-serif', 'size': 10, 'color': '#2C3E50'},
+                paper_bgcolor='white',
+                showlegend=True,
+                legend={'font': {'size': 9}}
+            )
+            st.plotly_chart(fig_status, use_container_width=True)
+        
+        st.markdown("---")
+        
+        # Top sponsors
+        st.markdown("### 🏢 Top Industry Sponsors")
+        
+        sponsor_counts = df_trials_filtered['Lead Sponsor'].value_counts().head(10).reset_index()
+        sponsor_counts.columns = ['Sponsor', 'Trial Count']
+        
+        fig_sponsors = px.bar(
+            sponsor_counts,
+            x='Trial Count',
+            y='Sponsor',
+            orientation='h',
+            title='<b>Top 10 Industry Sponsors</b>',
+            color='Trial Count',
+            color_continuous_scale=config.CHART_PALETTES['cool_gradient'],
+            text='Trial Count'
+        )
+        fig_sponsors.update_traces(textposition='outside')
+        fig_sponsors.update_layout(
+            yaxis={'categoryorder': 'total ascending'},
+            height=450,
+            showlegend=False,
+            title={'font': {'size': 16, 'color': '#1F6F65'}},
+            font={'family': 'Arial, sans-serif', 'size': 11, 'color': '#2C3E50'},
+            paper_bgcolor='white',
+            plot_bgcolor='white'
+        )
+        st.plotly_chart(fig_sponsors, use_container_width=True)
+        
+        st.markdown("---")
+        
+        # Biomarker activity
+        st.markdown("### 🧬 Biomarker Trial Activity")
+        
+        biomarker_counts = df_trials_filtered['Biomarker'].value_counts().head(15).reset_index()
+        biomarker_counts.columns = ['Biomarker', 'Trial Count']
+        
+        fig_biomarkers = px.bar(
+            biomarker_counts,
+            x='Trial Count',
+            y='Biomarker',
+            orientation='h',
+            title='<b>Top 15 Biomarkers by Trial Count</b>',
+            color='Trial Count',
+            color_continuous_scale=config.CHART_PALETTES['primary_gradient'],
+            text='Trial Count'
+        )
+        fig_biomarkers.update_traces(textposition='outside')
+        fig_biomarkers.update_layout(
+            yaxis={'categoryorder': 'total ascending'},
+            height=500,
+            showlegend=False,
+            title={'font': {'size': 16, 'color': '#1F6F65'}},
+            font={'family': 'Arial, sans-serif', 'size': 11, 'color': '#2C3E50'},
+            paper_bgcolor='white',
+            plot_bgcolor='white'
+        )
+        st.plotly_chart(fig_biomarkers, use_container_width=True)
+        
+        st.markdown("---")
+        
+        # Export options
+        st.markdown("### 📥 Export Data")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            csv_trials = df_trials_filtered.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📊 Download Filtered Trials (CSV)",
+                data=csv_trials,
+                file_name=f"clinical_trials_filtered_{st.session_state.condition_keyword}_2025-11-05_23-43-10.csv",
+                mime="text/csv",
+                use_container_width=True,
+                key="download_trials_filtered"
+            )
+        
+        with col2:
+            csv_all_trials = df_trials.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📄 Download All Trials (CSV)",
+                data=csv_all_trials,
+                file_name=f"clinical_trials_all_{st.session_state.condition_keyword}_2025-11-05_23-43-10.csv",
+                mime="text/csv",
+                use_container_width=True,
+                key="download_trials_all"
+            )
+    
+    else:
+        st.info("No clinical trials data available. Run the pipeline to fetch trial information.")
+    
+    # Footer
+    st.markdown("---")
+    st.markdown(f"""
+    <div style="text-align: center; font-size: 0.75rem; color: #888;">
+        <p><strong>Data Source:</strong> ClinicalTrials.gov API v2 | <strong>User:</strong> pulkit-079 | <strong>Timestamp:</strong> 2025-11-05 23:43:10 UTC</p>
+    </div>
+    """, unsafe_allow_html=True)        
+        
+
+# ============================================================================
+# SPONSOR INTELLIGENCE TAB - COMPREHENSIVE ANALYSIS
+# ============================================================================
+
+# ============================================================================
+# SPONSOR INTELLIGENCE TAB - SIMPLIFIED WITH MARKET CAP
+# ============================================================================
+
+with tab_sponsor:
+    st.markdown('<h2 class="section-header">Sponsor Intelligence</h2>', unsafe_allow_html=True)
+    st.markdown("Comprehensive sponsor analysis with market capitalization data")
+    
+    if st.session_state.df_clinical_trials is not None and not st.session_state.df_clinical_trials.empty:
+        df_trials = st.session_state.df_clinical_trials
+        
+        if 'Lead Sponsor' in df_trials.columns:
+            
+            # Aggregate sponsor data
+            sponsor_data = []
+            
+            for sponsor in df_trials['Lead Sponsor'].unique():
+                sponsor_trials = df_trials[df_trials['Lead Sponsor'] == sponsor]
+                phase_counts = sponsor_trials['Phase'].value_counts().to_dict()
+                biomarkers = sponsor_trials['Biomarker'].unique() if 'Biomarker' in sponsor_trials.columns else []
+                
+                sponsor_data.append({
+                    'Lead Sponsor': sponsor,
+                    'Total Trials': len(sponsor_trials),
+                    'Unique Biomarkers': len(biomarkers),
+                    'Phase 1': phase_counts.get('PHASE1', 0),
+                    'Phase 2': phase_counts.get('PHASE2', 0),
+                    'Phase 3': phase_counts.get('PHASE3', 0),
+                    'Top Biomarkers': ', '.join(list(biomarkers)[:3]) if len(biomarkers) > 0 else 'N/A'
+                })
+            
+            df_sponsor_summary = pd.DataFrame(sponsor_data).sort_values('Total Trials', ascending=False)
+            
+            st.markdown(f"**{len(df_sponsor_summary)} sponsors** | **{df_sponsor_summary['Total Trials'].sum():,} total trials**")
+            
+            st.markdown("---")
+            
+            # Market Cap Fetching Section
+            st.markdown('<h3 class="section-header">💰 Market Capitalization Data</h3>', unsafe_allow_html=True)
+            
+            col1, col2, col3 = st.columns([2, 1, 1])
+            
+            with col1:
+                st.info("Fetch real-time market cap data using Tavily + Azure OpenAI")
+            
+            with col2:
+                num_sponsors_fetch = st.selectbox(
+                    "Top N Sponsors",
+                    options=[5, 10, 15, 20, 25],
+                    index=1,
+                    key="sponsor_market_cap_count"
+                )
+            
+            with col3:
+                fetch_button = st.button("🔍 Fetch Market Cap", use_container_width=True, type="primary")
+            
+            if fetch_button:
+                with st.spinner(f"Fetching market cap for top {num_sponsors_fetch} sponsors..."):
+                    market_data = {}
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    
+                    top_sponsors = df_sponsor_summary.head(num_sponsors_fetch)['Lead Sponsor'].tolist()
+                    
+                    for idx, sponsor in enumerate(top_sponsors):
+                        status_text.text(f"Processing {idx + 1}/{num_sponsors_fetch}: {sponsor}")
+                        progress_bar.progress((idx + 1) / num_sponsors_fetch)
+                        
+                        market_info = get_market_cap_tavily_simple(sponsor)
+                        if market_info:
+                            market_data[sponsor] = market_info
+                        
+                        time.sleep(0.5)  # Rate limiting
+                    
+                    progress_bar.empty()
+                    status_text.empty()
+                    
+                    st.session_state.sponsor_market_data = market_data
+                    
+                    if market_data:
+                        st.success(f"✅ Successfully retrieved market cap for {len(market_data)}/{num_sponsors_fetch} sponsors")
+                    else:
+                        st.warning("⚠️ No market cap data found. This may be due to API limits or private companies.")
+            
+            st.markdown("---")
+            
+            # Comprehensive Sponsor Table
+            st.markdown('<h3 class="section-header">📊 Sponsor Analysis Table</h3>', unsafe_allow_html=True)
+            
+            # Merge market cap if available
+            if st.session_state.sponsor_market_data:
+                market_cap_df = pd.DataFrame([
+                    {
+                        'Lead Sponsor': company,
+                        'Market Cap (B USD)': data['market_cap_b']
+                    }
+                    for company, data in st.session_state.sponsor_market_data.items()
+                ])
+                
+                df_sponsor_final = df_sponsor_summary.merge(
+                    market_cap_df,
+                    on='Lead Sponsor',
+                    how='left'
+                )
+                
+                # Reorder columns to show market cap first
+                column_order = [
+                    'Lead Sponsor',
+                    'Market Cap (B USD)',
+                    'Total Trials',
+                    'Unique Biomarkers',
+                    'Phase 1',
+                    'Phase 2',
+                    'Phase 3',
+                    'Top Biomarkers'
+                ]
+                df_sponsor_final = df_sponsor_final[column_order]
+            else:
+                df_sponsor_final = df_sponsor_summary
+            
+            # Filter Controls
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                min_trials = st.slider(
+                    "Minimum Trial Count",
+                    min_value=1,
+                    max_value=int(df_sponsor_final['Total Trials'].max()),
+                    value=1,
+                    key="sponsor_min_trials_filter"
+                )
+            
+            with col2:
+                search_sponsor = st.text_input(
+                    "Search Sponsor",
+                    placeholder="Enter sponsor name...",
+                    key="sponsor_search_input"
+                )
+            
+            with col3:
+                sort_by = st.selectbox(
+                    "Sort By",
+                    options=['Total Trials', 'Market Cap (B USD)', 'Unique Biomarkers', 'Phase 3'],
+                    index=0,
+                    key="sponsor_sort_by"
+                )
+            
+            # Apply filters
+            df_sponsor_filtered = df_sponsor_final[df_sponsor_final['Total Trials'] >= min_trials]
+            
+            if search_sponsor:
+                df_sponsor_filtered = df_sponsor_filtered[
+                    df_sponsor_filtered['Lead Sponsor'].str.contains(search_sponsor, case=False, na=False)
+                ]
+            
+            # Sort
+            if sort_by in df_sponsor_filtered.columns:
+                df_sponsor_filtered = df_sponsor_filtered.sort_values(sort_by, ascending=False)
+            
+            # Display summary metrics
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("Filtered Sponsors", len(df_sponsor_filtered))
+            
+            with col2:
+                st.metric("Total Trials", df_sponsor_filtered['Total Trials'].sum())
+            
+            with col3:
+                avg_trials = df_sponsor_filtered['Total Trials'].mean()
+                st.metric("Avg Trials/Sponsor", f"{avg_trials:.1f}")
+            
+            with col4:
+                if 'Market Cap (B USD)' in df_sponsor_filtered.columns:
+                    market_cap_count = df_sponsor_filtered['Market Cap (B USD)'].notna().sum()
+                    st.metric("With Market Cap", market_cap_count)
+                else:
+                    st.metric("With Market Cap", 0)
+            
+            st.markdown("---")
+            
+            # Main Table
+            num_rows = len(df_sponsor_filtered)
+            table_height = min(600, max(200, num_rows * 35 + 38))
+            
+            st.dataframe(
+                df_sponsor_filtered,
+                use_container_width=True,
+                hide_index=True,
+                height=table_height,
+                column_config={
+                    "Lead Sponsor": st.column_config.TextColumn("Sponsor", width="medium"),
+                    "Market Cap (B USD)": st.column_config.NumberColumn(
+                        "Market Cap (B $)",
+                        format="%.2f",
+                        width="small"
+                    ),
+                    "Total Trials": st.column_config.NumberColumn("Total Trials", width="small"),
+                    "Unique Biomarkers": st.column_config.NumberColumn("Biomarkers", width="small"),
+                    "Phase 1": st.column_config.NumberColumn("Phase 1", width="small"),
+                    "Phase 2": st.column_config.NumberColumn("Phase 2", width="small"),
+                    "Phase 3": st.column_config.NumberColumn("Phase 3", width="small"),
+                    "Top Biomarkers": st.column_config.TextColumn("Top Biomarkers", width="large")
+                }
+            )
+            
+            st.markdown("---")
+            
+            # Optional: Market Cap Visualization
+            if st.session_state.sponsor_market_data and 'Market Cap (B USD)' in df_sponsor_filtered.columns:
+                market_viz_df = df_sponsor_filtered.dropna(subset=['Market Cap (B USD)'])
+                
+                if not market_viz_df.empty and len(market_viz_df) > 1:
+                    with st.expander("📈 View Market Cap Visualization", expanded=False):
+                        
+                        fig_market = px.scatter(
+                            market_viz_df,
+                            x='Total Trials',
+                            y='Market Cap (B USD)',
+                            size='Unique Biomarkers',
+                            color='Total Trials',
+                            hover_data=['Lead Sponsor', 'Phase 1', 'Phase 2', 'Phase 3'],
+                            title="<b>Market Cap vs Trial Activity</b>",
+                            color_continuous_scale=config.CHART_PALETTES['cool_gradient'],
+                            height=500
+                        )
+                        
+                        fig_market.update_traces(
+                            marker=dict(opacity=0.7, line=dict(color='white', width=1.5))
+                        )
+                        
+                        fig_market.update_layout(
+                            xaxis={
+                                'title': {'text': 'Total Clinical Trials', 'font': {'size': 13, 'color': '#4A4A4A'}}, 
+                                'showgrid': True,
+                                'gridcolor': '#E0E0E0'
+                            },
+                            yaxis={
+                                'title': {'text': 'Market Cap (Billions USD)', 'font': {'size': 13, 'color': '#4A4A4A'}}, 
+                                'showgrid': True,
+                                'gridcolor': '#E0E0E0'
+                            },
+                            font={'family': 'Arial, sans-serif', 'size': 11, 'color': '#2C3E50'},
+                            paper_bgcolor='white',
+                            plot_bgcolor='white',
+                            title={'text': '<b>Market Cap vs Trial Activity</b>', 'font': {'size': 17, 'color': '#1F6F65'}},
+                            margin={'t': 60, 'l': 60, 'r': 20, 'b': 60}
+                        )
+                        
+                        st.plotly_chart(fig_market, use_container_width=True)
+            
+            # Download Button
+            csv_sponsor = df_sponsor_filtered.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Download Sponsor Intelligence (CSV)",
+                data=csv_sponsor,
+                file_name=f"sponsor_intelligence_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        else:
+            st.info("Lead Sponsor data not available in clinical trials")
+    else:
+        st.info("No clinical trials data available. Run the pipeline first.")
+
+# ============================================================================
+# FOOTER - PROFESSIONAL BRANDING
+# ============================================================================
+
+st.markdown("---")
+st.markdown(f"""
+<div style="text-align: center; padding: 2rem 1rem; background: #F8F9FA; border-radius: 8px; margin-top: 2rem;">
+    <p style="font-size: 1.1rem; font-weight: 600; color: #1F6F65; margin-bottom: 0.5rem;">
+        Cancer Research Intelligence Platform
+    </p>
+    <p style="font-size: 0.9rem; color: #7A7A7A; margin-bottom: 0.3rem;">
+        <strong>Version:</strong> 4.1.0 | <strong>User:</strong> pulkit-079 | <strong>Date:</strong> 2025-11-04 22:50:00 UTC
+    </p>
+    <p style="font-size: 0.85rem; color: #7A7A7A; margin: 0;">
+        Professional analytics for oncology drug discovery and development
+    </p>
+    <p style="font-size: 0.8rem; color: #B0B0B0; margin-top: 0.5rem;">
+        Powered by Axtria • Azure OpenAI Standardization
+    </p>
+</div>
+""", unsafe_allow_html=True)                                                        
